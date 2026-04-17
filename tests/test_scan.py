@@ -353,6 +353,24 @@ def test_clear_terminal_writes_ansi_clear_sequence(capsys) -> None:
     assert capsys.readouterr().out == "\033[2J\033[H"
 
 
+def test_clear_terminal_flushes_stdout() -> None:
+    events: list[object] = []
+
+    class FakeStdout:
+        def write(self, text: str) -> int:
+            events.append(("write", text))
+            return len(text)
+
+        def flush(self) -> None:
+            events.append("flush")
+
+    with patch("sys.stdout", FakeStdout()):
+        clear_terminal()
+
+    assert events[0] == ("write", "\033[2J\033[H")
+    assert "flush" in events
+
+
 def test_cli_clears_terminal_after_app_exit() -> None:
     events: list[str] = []
 

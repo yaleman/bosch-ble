@@ -494,7 +494,7 @@ def cli() -> None:
 
 
 def clear_terminal() -> None:
-    print("\033[2J\033[H", end="")
+    print("\033[2J\033[H", end="", flush=True)
 
 
 if __name__ == "__main__":
