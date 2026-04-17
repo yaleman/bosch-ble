@@ -11,7 +11,10 @@ from bosch_ble.scan import (
     SeenDevice,
     SortMode,
     build_detail_lines,
+    build_column_labels,
     build_table_rows,
+    clear_terminal,
+    cli,
     format_age,
     load_ignored_addresses,
     save_ignored_addresses,
@@ -110,6 +113,15 @@ def test_build_table_rows_marks_ignored_devices() -> None:
 
     assert rows[0].ignored is True
     assert rows[1].ignored is False
+
+
+def test_build_column_labels_bolds_active_sort_column() -> None:
+    labels = build_column_labels(SortMode.ADDRESS)
+
+    assert labels[0].plain == "Name"
+    assert labels[0].style == "none"
+    assert labels[1].plain == "Address"
+    assert labels[1].style == "bold"
 
 
 def test_build_table_rows_uses_placeholder_for_missing_name_and_rssi() -> None:
@@ -244,3 +256,23 @@ def test_ignore_bindings_update_visible_devices_and_persist(tmp_path: Path) -> N
                 scan.DEVICES.clear()
 
     asyncio.run(run())
+
+
+def test_clear_terminal_writes_ansi_clear_sequence(capsys) -> None:
+    clear_terminal()
+
+    assert capsys.readouterr().out == "\033[2J\033[H"
+
+
+def test_cli_clears_terminal_after_app_exit() -> None:
+    events: list[str] = []
+
+    class FakeApp:
+        def run(self) -> None:
+            events.append("run")
+
+    with patch("bosch_ble.scan.ScannerApp", return_value=FakeApp()):
+        with patch("bosch_ble.scan.clear_terminal", side_effect=lambda: events.append("clear")):
+            cli()
+
+    assert events == ["run", "clear"]

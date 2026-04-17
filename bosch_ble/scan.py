@@ -118,6 +118,20 @@ def fmt_bytes(data: bytes, limit: int = 32) -> str:
     return hexed
 
 
+def build_column_labels(sort_mode: SortMode) -> list[Text]:
+    columns = [
+        ("Name", SortMode.NAME),
+        ("Address", SortMode.ADDRESS),
+        ("RSSI", SortMode.RSSI),
+        ("Seen", None),
+        ("Age", SortMode.RECENT),
+    ]
+    return [
+        Text(label, style="bold" if mode is sort_mode else "none")
+        for label, mode in columns
+    ]
+
+
 def format_age(seconds: float) -> str:
     if seconds < 60:
         return f"{seconds:.1f}s"
@@ -321,7 +335,6 @@ class ScannerApp(App[None]):
         table = self.query_one("#devices", DataTable)
         table.cursor_type = "row"
         table.zebra_stripes = True
-        table.add_columns("Name", "Address", "RSSI", "Seen", "Age")
         table.focus()
 
         self.set_interval(self.REFRESH_INTERVAL_SECONDS, self.refresh_view)
@@ -381,7 +394,8 @@ class ScannerApp(App[None]):
             ignored_addresses=self.ignored_addresses,
         )
         table = self.query_one("#devices", DataTable)
-        table.clear(columns=False)
+        table.clear(columns=True)
+        table.add_columns(*build_column_labels(self.sort_mode))
         for row in rows:
             style = "dim" if row.ignored else ""
             table.add_row(
@@ -449,7 +463,16 @@ class ScannerApp(App[None]):
 
 
 def cli() -> None:
-    ScannerApp().run()
+    try:
+        ScannerApp().run()
+    except KeyboardInterrupt:
+        pass
+    finally:
+        clear_terminal()
+
+
+def clear_terminal() -> None:
+    print("\033[2J\033[H", end="")
 
 
 if __name__ == "__main__":
