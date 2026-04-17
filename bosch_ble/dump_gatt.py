@@ -56,7 +56,13 @@ def cli() -> None:
         print(f"Usage: {sys.argv[0]} <BLE_ADDRESS>")
         raise SystemExit(2)
 
-    asyncio.run(main(sys.argv[1]))
+    try:
+        asyncio.run(main(sys.argv[1]))
+    except KeyboardInterrupt:
+        raise SystemExit(130)
+    except Exception as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        raise SystemExit(1)
 
 
 if __name__ == "__main__":

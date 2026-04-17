@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from enum import StrEnum
 import json
+import os
 from pathlib import Path
 from rich.text import Text
 from threading import Lock
@@ -276,7 +277,7 @@ def detection_callback(device: Any, advertisement_data: Any) -> None:
         entry.service_data = dict(advertisement_data.service_data or {})
 
 
-class ScannerApp(App[None]):
+class ScannerApp(App[str | None]):
     REFRESH_INTERVAL_SECONDS = 1.0
 
     CSS = """
@@ -389,6 +390,7 @@ class ScannerApp(App[None]):
     def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
         self.selected_address = str(event.row_key.value)
         self.refresh_details()
+        self.exit(result=self.selected_address)
 
     def refresh_view(self) -> None:
         now = datetime.now()
@@ -471,17 +473,24 @@ class ScannerApp(App[None]):
             f"Ignored:{len(self.ignored_addresses)}({ignored_state})  "
             f"Stale:{stale_state}  "
             f"↑↓ select  s sort  f stale  h hide-ignored  i toggle  "
-            f"I toggle-visible  q quit"
+            f"I toggle-visible  enter dump  q quit"
         )
 
 
 def cli() -> None:
+    selected_address: str | None = None
     try:
-        ScannerApp().run()
+        selected_address = ScannerApp().run()
     except KeyboardInterrupt:
         pass
     finally:
         clear_terminal()
+
+    if selected_address is not None:
+        os.execvp(
+            "bosch-ble-dump-gatt",
+            ["bosch-ble-dump-gatt", selected_address],
+        )
 
 
 def clear_terminal() -> None:

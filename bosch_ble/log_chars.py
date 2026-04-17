@@ -97,7 +97,13 @@ def cli() -> None:
 
     address = sys.argv[1]
     output = sys.argv[2] if len(sys.argv) == 3 else "ble_log.txt"
-    asyncio.run(main(address, output))
+    try:
+        asyncio.run(main(address, output))
+    except KeyboardInterrupt:
+        raise SystemExit(130)
+    except Exception as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        raise SystemExit(1)
 
 
 if __name__ == "__main__":
