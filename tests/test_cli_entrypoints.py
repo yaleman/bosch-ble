@@ -392,7 +392,12 @@ def test_bluez_preflight_cli_reports_visible_device_and_state(
                 stderr="",
             )
         if argv[:2] == ["busctl", "introspect"]:
-            return CompletedProcess(argv, 0, stdout="ServicesResolved true\n", stderr="")
+            return CompletedProcess(
+                argv,
+                0,
+                stdout=".ServicesResolved  property  b  true\n",
+                stderr="",
+            )
         raise AssertionError(argv)
 
     with patch.object(bluez, "run_command", side_effect=fake_run):

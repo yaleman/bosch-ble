@@ -76,9 +76,10 @@ def parse_flag(text: str, key: str) -> bool | None:
                 return True
             if value in {"no", "false"}:
                 return False
-        parts = normalized.split()
-        if parts and parts[0].lower() == key_lower:
-            for part in reversed(parts[1:]):
+        parts = [part.strip().lstrip(".").rstrip(":").lower() for part in normalized.split()]
+        if key_lower in parts:
+            key_index = parts.index(key_lower)
+            for part in reversed(parts[key_index + 1 :]):
                 value = part.strip().lower()
                 if value in {"yes", "true"}:
                     return True
