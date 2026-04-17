@@ -115,13 +115,31 @@ def test_build_table_rows_marks_ignored_devices() -> None:
     assert rows[1].ignored is False
 
 
-def test_build_column_labels_bolds_active_sort_column() -> None:
+def test_build_table_rows_can_hide_ignored_devices() -> None:
+    now = datetime.now()
+    devices = {
+        "AA:AA": make_device(name="ignored", seconds_ago=1),
+        "BB:BB": make_device(name="active", seconds_ago=2),
+    }
+
+    rows = build_table_rows(
+        devices,
+        now=now,
+        sort_mode=SortMode.RECENT,
+        ignored_addresses={"AA:AA"},
+        hide_ignored=True,
+    )
+
+    assert [row.address for row in rows] == ["BB:BB"]
+
+
+def test_build_column_labels_marks_active_sort_column_red() -> None:
     labels = build_column_labels(SortMode.ADDRESS)
 
     assert labels[0].plain == "Name"
     assert labels[0].style == "none"
     assert labels[1].plain == "Address"
-    assert labels[1].style == "bold"
+    assert labels[1].style == "red"
 
 
 def test_build_table_rows_uses_placeholder_for_missing_name_and_rssi() -> None:
@@ -250,6 +268,46 @@ def test_ignore_bindings_update_visible_devices_and_persist(tmp_path: Path) -> N
                 await pilot.pause()
                 assert app.ignored_addresses == set()
                 assert load_ignored_addresses(ignore_path) == set()
+                app.exit()
+
+            with scan.DEVICES_LOCK:
+                scan.DEVICES.clear()
+
+    asyncio.run(run())
+
+
+def test_hide_ignored_binding_filters_visible_rows(tmp_path: Path) -> None:
+    ignore_path = tmp_path / "ignored.json"
+
+    async def run() -> None:
+        with patch("bosch_ble.scan.BleakScanner", FakeScanner):
+            from bosch_ble import scan
+
+            with scan.DEVICES_LOCK:
+                scan.DEVICES.clear()
+                scan.DEVICES.update(
+                    {
+                        "AA:AA": make_device(name="one", seconds_ago=1),
+                        "BB:BB": make_device(name="two", seconds_ago=2),
+                    }
+                )
+
+            save_ignored_addresses(ignore_path, {"AA:AA"})
+            app = ScannerApp(ignore_store_path=ignore_path)
+            async with app.run_test() as pilot:
+                await pilot.pause()
+                assert app.hide_ignored is False
+                assert app.visible_addresses == ["AA:AA", "BB:BB"]
+
+                await pilot.press("h")
+                await pilot.pause()
+                assert app.hide_ignored is True
+                assert app.visible_addresses == ["BB:BB"]
+
+                await pilot.press("h")
+                await pilot.pause()
+                assert app.hide_ignored is False
+                assert app.visible_addresses == ["AA:AA", "BB:BB"]
                 app.exit()
 
             with scan.DEVICES_LOCK:

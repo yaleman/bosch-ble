@@ -51,8 +51,13 @@ async def main(address: str) -> None:
             print("-" * 100)
 
 
-if __name__ == "__main__":
+def cli() -> None:
     if len(sys.argv) != 2:
         print(f"Usage: {sys.argv[0]} <BLE_ADDRESS>")
         raise SystemExit(2)
+
     asyncio.run(main(sys.argv[1]))
+
+
+if __name__ == "__main__":
+    cli()

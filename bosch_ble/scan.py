@@ -127,7 +127,7 @@ def build_column_labels(sort_mode: SortMode) -> list[Text]:
         ("Age", SortMode.RECENT),
     ]
     return [
-        Text(label, style="bold" if mode is sort_mode else "none")
+        Text(label, style="red" if mode is sort_mode else "none")
         for label, mode in columns
     ]
 
@@ -151,6 +151,7 @@ def build_table_rows(
     now: datetime,
     sort_mode: SortMode,
     hide_stale: bool = False,
+    hide_ignored: bool = False,
     ignored_addresses: set[str] | None = None,
     stale_after_seconds: float = STALE_AFTER_SECONDS,
 ) -> list[TableRow]:
@@ -162,6 +163,8 @@ def build_table_rows(
     for address, device in devices.items():
         age_seconds = max((now - device.last_seen).total_seconds(), 0.0)
         if hide_stale and age_seconds > stale_after_seconds:
+            continue
+        if hide_ignored and normalize_address(address) in ignored_lookup:
             continue
 
         rows.append(
@@ -308,6 +311,7 @@ class ScannerApp(App[None]):
         Binding("q", "quit", "Quit"),
         Binding("s", "cycle_sort", "Sort", priority=True),
         Binding("f", "toggle_stale", "Stale", priority=True),
+        Binding("h", "toggle_hide_ignored", "Hide Ignored", priority=True),
         Binding("i", "toggle_ignore_selected", "Ignore", priority=True),
         Binding("I", "toggle_ignore_visible", "Ignore All", priority=True),
         Binding("ctrl+c", "quit", show=False),
@@ -317,6 +321,7 @@ class ScannerApp(App[None]):
         super().__init__()
         self.sort_mode = SortMode.RECENT
         self.hide_stale = False
+        self.hide_ignored = False
         self.selected_address: str | None = None
         self.visible_addresses: list[str] = []
         self.ignore_store_path = ignore_store_path or DEFAULT_IGNORE_STORE_PATH
@@ -352,6 +357,10 @@ class ScannerApp(App[None]):
 
     def action_toggle_stale(self) -> None:
         self.hide_stale = not self.hide_stale
+        self.refresh_view()
+
+    def action_toggle_hide_ignored(self) -> None:
+        self.hide_ignored = not self.hide_ignored
         self.refresh_view()
 
     def action_toggle_ignore_selected(self) -> None:
@@ -391,6 +400,7 @@ class ScannerApp(App[None]):
             now=now,
             sort_mode=self.sort_mode,
             hide_stale=self.hide_stale,
+            hide_ignored=self.hide_ignored,
             ignored_addresses=self.ignored_addresses,
         )
         table = self.query_one("#devices", DataTable)
@@ -455,10 +465,13 @@ class ScannerApp(App[None]):
     def refresh_status(self, *, device_count: int) -> None:
         status = self.query_one("#status", Static)
         stale_state = "hidden" if self.hide_stale else "shown"
+        ignored_state = "hidden" if self.hide_ignored else "shown"
         status.update(
             f"Devices:{device_count}  Sort:{self.sort_mode.label}  "
-            f"Ignored:{len(self.ignored_addresses)}  Stale:{stale_state}  "
-            f"↑↓ select  s sort  f stale  i toggle  I toggle-visible  q quit"
+            f"Ignored:{len(self.ignored_addresses)}({ignored_state})  "
+            f"Stale:{stale_state}  "
+            f"↑↓ select  s sort  f stale  h hide-ignored  i toggle  "
+            f"I toggle-visible  q quit"
         )
 
 

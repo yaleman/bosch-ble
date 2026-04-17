@@ -90,7 +90,7 @@ async def main(address: str, out_file: str = "ble_log.txt") -> None:
                     fh.write(f"{ts()} UNSUBSCRIBE_FAILED {uuid} error={exc}\n")
 
 
-if __name__ == "__main__":
+def cli() -> None:
     if len(sys.argv) not in {2, 3}:
         print(f"Usage: {sys.argv[0]} <BLE_ADDRESS> [output_file]")
         raise SystemExit(2)
@@ -98,3 +98,7 @@ if __name__ == "__main__":
     address = sys.argv[1]
     output = sys.argv[2] if len(sys.argv) == 3 else "ble_log.txt"
     asyncio.run(main(address, output))
+
+
+if __name__ == "__main__":
+    cli()
