@@ -42,6 +42,56 @@ def test_dump_gatt_cli_prints_friendly_error(capsys: pytest.CaptureFixture[str])
     assert "Traceback" not in captured.err
 
 
+def test_dump_gatt_main_resolves_device_before_connecting(capsys: pytest.CaptureFixture[str]) -> None:
+    class FakeClient:
+        def __init__(self, address_or_ble_device, timeout: float = 20.0) -> None:
+            self.address_or_ble_device = address_or_ble_device
+            self.timeout = timeout
+            self.is_connected = True
+            self.services = []
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb) -> None:
+            return None
+
+    fake_device = object()
+
+    async def run() -> None:
+        with patch.object(
+            dump_gatt.BleakScanner,
+            "find_device_by_address",
+            side_effect=lambda address, timeout=10.0: fake_device,
+        ) as find_device:
+            with patch.object(dump_gatt, "BleakClient", FakeClient):
+                await dump_gatt.main("AA:BB")
+
+        find_device.assert_called_once_with("AA:BB", timeout=10.0)
+
+    import asyncio
+
+    asyncio.run(run())
+    assert "Connecting to AA:BB ..." in capsys.readouterr().out
+
+
+def test_dump_gatt_main_errors_cleanly_when_scan_cannot_find_device() -> None:
+    async def run() -> None:
+        with patch.object(
+            dump_gatt.BleakScanner,
+            "find_device_by_address",
+            side_effect=lambda address, timeout=10.0: None,
+        ):
+            with pytest.raises(RuntimeError) as excinfo:
+                await dump_gatt.main("AA:BB")
+
+        assert str(excinfo.value) == "Device with address AA:BB was not found."
+
+    import asyncio
+
+    asyncio.run(run())
+
+
 def test_log_chars_cli_shows_usage_without_address(capsys: pytest.CaptureFixture[str]) -> None:
     with patch("sys.argv", ["bosch-ble-log-chars"]):
         with pytest.raises(SystemExit) as excinfo:

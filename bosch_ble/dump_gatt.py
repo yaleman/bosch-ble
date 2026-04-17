@@ -4,7 +4,7 @@ from __future__ import annotations
 import asyncio
 import sys
 
-from bleak import BleakClient
+from bleak import BleakClient, BleakScanner
 from bleak.backends.characteristic import CharacteristicPropertyName
 
 
@@ -14,7 +14,11 @@ def props_to_str(props: list[str | "CharacteristicPropertyName"]) -> str:
 
 async def main(address: str) -> None:
     print(f"Connecting to {address} ...")
-    async with BleakClient(address, timeout=20.0) as client:
+    device = await BleakScanner.find_device_by_address(address, timeout=10.0)
+    if device is None:
+        raise RuntimeError(f"Device with address {address} was not found.")
+
+    async with BleakClient(device, timeout=20.0) as client:
         print(f"Connected: {client.is_connected}")
         if not client.is_connected:
             raise RuntimeError("Failed to connect")
