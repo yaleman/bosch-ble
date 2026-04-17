@@ -7,6 +7,8 @@ import sys
 from bleak import BleakClient, BleakScanner
 from bleak.backends.characteristic import CharacteristicPropertyName
 
+DISCOVERY_RETRY_ATTEMPTS = 2
+
 
 def props_to_str(props: list[str | "CharacteristicPropertyName"]) -> str:
     return ",".join(sorted(props))
@@ -14,45 +16,62 @@ def props_to_str(props: list[str | "CharacteristicPropertyName"]) -> str:
 
 async def main(address: str) -> None:
     print(f"Connecting to {address} ...")
-    device = await BleakScanner.find_device_by_address(address, timeout=10.0)
-    if device is None:
-        raise RuntimeError(f"Device with address {address} was not found.")
+    last_error: Exception | None = None
+    for attempt in range(1, DISCOVERY_RETRY_ATTEMPTS + 1):
+        device = await BleakScanner.find_device_by_address(address, timeout=10.0)
+        if device is None:
+            raise RuntimeError(f"Device with address {address} was not found.")
 
-    async with BleakClient(device, timeout=20.0) as client:
-        print(f"Connected: {client.is_connected}")
-        if not client.is_connected:
-            raise RuntimeError("Failed to connect")
+        try:
+            async with BleakClient(device, timeout=20.0) as client:
+                print(f"Connected: {client.is_connected}")
+                if not client.is_connected:
+                    raise RuntimeError("Failed to connect")
 
-        print()
-        print("Services and characteristics")
-        print("=" * 100)
+                print()
+                print("Services and characteristics")
+                print("=" * 100)
 
-        for service in client.services:
-            print(f"[SERVICE] {service.uuid}  ({service.description})")
-            for char in service.characteristics:
-                print(f"  [CHAR] {char.uuid}")
-                print(f"         properties={props_to_str(char.properties)}")  # ty:ignore[invalid-argument-type]
-                print(f"         description={char.description}")
+                for service in client.services:
+                    print(f"[SERVICE] {service.uuid}  ({service.description})")
+                    for char in service.characteristics:
+                        print(f"  [CHAR] {char.uuid}")
+                        print(f"         properties={props_to_str(char.properties)}")  # ty:ignore[invalid-argument-type]
+                        print(f"         description={char.description}")
 
-                if "read" in char.properties:
-                    try:
-                        value = await client.read_gatt_char(char.uuid)
-                        print(f"         value={value.hex()}  raw={value!r}")
-                    except Exception as exc:
-                        print(f"         read failed: {exc}")
+                        if "read" in char.properties:
+                            try:
+                                value = await client.read_gatt_char(char.uuid)
+                                print(f"         value={value.hex()}  raw={value!r}")
+                            except Exception as exc:
+                                print(f"         read failed: {exc}")
 
-                for descriptor in char.descriptors:
-                    print(
-                        f"    [DESC] handle={descriptor.handle} uuid={descriptor.uuid}"
-                    )
-                    try:
-                        dval = await client.read_gatt_descriptor(descriptor.handle)
-                        print(
-                            f"           value={bytes(dval).hex()} raw={bytes(dval)!r}"
-                        )
-                    except Exception as exc:
-                        print(f"           read failed: {exc}")
-            print("-" * 100)
+                        for descriptor in char.descriptors:
+                            print(
+                                f"    [DESC] handle={descriptor.handle} uuid={descriptor.uuid}"
+                            )
+                            try:
+                                dval = await client.read_gatt_descriptor(descriptor.handle)
+                                print(
+                                    f"           value={bytes(dval).hex()} raw={bytes(dval)!r}"
+                                )
+                            except Exception as exc:
+                                print(f"           read failed: {exc}")
+                    print("-" * 100)
+            return
+        except Exception as exc:
+            last_error = exc
+            if (
+                attempt < DISCOVERY_RETRY_ATTEMPTS
+                and "failed to discover services" in str(exc).lower()
+            ):
+                print(f"Retrying service discovery for {address} ...")
+                await asyncio.sleep(1)
+                continue
+            raise
+
+    if last_error is not None:
+        raise last_error
 
 
 def cli() -> None:
