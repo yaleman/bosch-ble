@@ -4,10 +4,13 @@ from __future__ import annotations
 import asyncio
 import sys
 
-from bleak import BleakClient, BleakScanner
+from bleak import BleakClient
 from bleak.backends.characteristic import CharacteristicPropertyName
 
+from bosch_ble import bluez
+
 DISCOVERY_RETRY_ATTEMPTS = 3
+REDISCOVERY_TIMEOUT = 10.0
 
 
 def props_to_str(props: list[str | "CharacteristicPropertyName"]) -> str:
@@ -27,16 +30,47 @@ def retry_message(error: Exception, address: str) -> str | None:
     return None
 
 
+async def resolve_device(address: str) -> bluez.BluezState:
+    state = await bluez.preflight_device(address)
+    bluez.print_preflight_summary(state)
+
+    if state.device is None:
+        print(f"Rediscovering {address} ...")
+        state = await bluez.preflight_device(address, scan_timeout=REDISCOVERY_TIMEOUT)
+        bluez.print_preflight_summary(state)
+
+    if state.device is None:
+        raise RuntimeError(f"Device with address {address} was not found.")
+    return state
+
+
+async def prepare_connection(address: str) -> bluez.BluezState:
+    state = await resolve_device(address)
+    connected_state = bluez.assist_connection(address)
+    if connected_state.services_resolved is not True:
+        print(f"Waiting for BlueZ services for {address} ...")
+        connected_state = await bluez.wait_for_services(address)
+    return bluez.BluezState(
+        address=connected_state.address,
+        visible=connected_state.visible,
+        device=state.device,
+        name=state.name or connected_state.name,
+        paired=connected_state.paired,
+        trusted=connected_state.trusted,
+        connected=connected_state.connected,
+        services_resolved=connected_state.services_resolved,
+        bluetoothctl=connected_state.bluetoothctl,
+        busctl=connected_state.busctl,
+    )
+
+
 async def main(address: str) -> None:
     print(f"Connecting to {address} ...")
     last_error: Exception | None = None
     for attempt in range(1, DISCOVERY_RETRY_ATTEMPTS + 1):
-        device = await BleakScanner.find_device_by_address(address, timeout=10.0)
-        if device is None:
-            raise RuntimeError(f"Device with address {address} was not found.")
-
         try:
-            async with BleakClient(device, timeout=20.0) as client:
+            state = await prepare_connection(address)
+            async with BleakClient(state.device, timeout=20.0) as client:
                 print(f"Connected: {client.is_connected}")
                 if not client.is_connected:
                     raise RuntimeError("Failed to connect")
