@@ -132,6 +132,48 @@ def test_dump_gatt_main_retries_when_service_discovery_disconnects(
     assert "Retrying service discovery for AA:BB ..." in output
 
 
+def test_dump_gatt_main_retries_when_bluez_reports_operation_in_progress(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    class FakeClient:
+        attempts = 0
+
+        def __init__(self, address_or_ble_device, timeout: float = 20.0) -> None:
+            self.address_or_ble_device = address_or_ble_device
+            self.timeout = timeout
+            self.is_connected = True
+            self.services = []
+
+        async def __aenter__(self):
+            type(self).attempts += 1
+            if type(self).attempts == 1:
+                raise RuntimeError("failed to discover services, device disconnected")
+            if type(self).attempts == 2:
+                raise RuntimeError("[org.bluez.Error.Failed] Operation already in progress")
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb) -> None:
+            return None
+
+    async def run() -> None:
+        with patch.object(
+            dump_gatt.BleakScanner,
+            "find_device_by_address",
+            side_effect=lambda address, timeout=10.0: object(),
+        ) as find_device:
+            with patch.object(dump_gatt, "BleakClient", FakeClient):
+                await dump_gatt.main("AA:BB")
+
+        assert find_device.call_count == 3
+
+    import asyncio
+
+    asyncio.run(run())
+    output = capsys.readouterr().out
+    assert "Retrying service discovery for AA:BB ..." in output
+    assert "Retrying connection setup for AA:BB ..." in output
+
+
 def test_log_chars_cli_shows_usage_without_address(capsys: pytest.CaptureFixture[str]) -> None:
     with patch("sys.argv", ["bosch-ble-log-chars"]):
         with pytest.raises(SystemExit) as excinfo:

@@ -7,11 +7,20 @@ import sys
 from bleak import BleakClient, BleakScanner
 from bleak.backends.characteristic import CharacteristicPropertyName
 
-DISCOVERY_RETRY_ATTEMPTS = 2
+DISCOVERY_RETRY_ATTEMPTS = 3
 
 
 def props_to_str(props: list[str | "CharacteristicPropertyName"]) -> str:
     return ",".join(sorted(props))
+
+
+def retry_message(error: Exception, address: str) -> str | None:
+    message = str(error).lower()
+    if "failed to discover services" in message:
+        return f"Retrying service discovery for {address} ..."
+    if "operation already in progress" in message:
+        return f"Retrying connection setup for {address} ..."
+    return None
 
 
 async def main(address: str) -> None:
@@ -61,12 +70,10 @@ async def main(address: str) -> None:
             return
         except Exception as exc:
             last_error = exc
-            if (
-                attempt < DISCOVERY_RETRY_ATTEMPTS
-                and "failed to discover services" in str(exc).lower()
-            ):
-                print(f"Retrying service discovery for {address} ...")
-                await asyncio.sleep(1)
+            message = retry_message(exc, address)
+            if attempt < DISCOVERY_RETRY_ATTEMPTS and message is not None:
+                print(message)
+                await asyncio.sleep(attempt)
                 continue
             raise
 
