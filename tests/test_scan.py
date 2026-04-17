@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import asyncio
+import json
 from datetime import datetime, timedelta
+from pathlib import Path
 from unittest.mock import patch
 
 from bosch_ble.scan import (
@@ -10,6 +13,9 @@ from bosch_ble.scan import (
     build_detail_lines,
     build_table_rows,
     format_age,
+    load_ignored_addresses,
+    save_ignored_addresses,
+    toggle_visible_ignored,
 )
 
 
@@ -88,6 +94,24 @@ def test_build_table_rows_can_sort_by_address() -> None:
     assert [row.address for row in rows] == ["AA:AA", "BB:BB", "CC:CC"]
 
 
+def test_build_table_rows_marks_ignored_devices() -> None:
+    now = datetime.now()
+    devices = {
+        "AA:AA": make_device(name="ignored", seconds_ago=1),
+        "BB:BB": make_device(name="active", seconds_ago=2),
+    }
+
+    rows = build_table_rows(
+        devices,
+        now=now,
+        sort_mode=SortMode.RECENT,
+        ignored_addresses={"AA:AA"},
+    )
+
+    assert rows[0].ignored is True
+    assert rows[1].ignored is False
+
+
 def test_build_table_rows_uses_placeholder_for_missing_name_and_rssi() -> None:
     now = datetime.now()
     devices = {
@@ -129,6 +153,25 @@ def test_build_detail_lines_returns_empty_state_message() -> None:
     ]
 
 
+def test_ignore_store_round_trip(tmp_path: Path) -> None:
+    path = tmp_path / "ignored.json"
+
+    save_ignored_addresses(path, {"aa:aa", "CC:CC"})
+
+    assert json.loads(path.read_text()) == ["AA:AA", "CC:CC"]
+    assert load_ignored_addresses(path) == {"AA:AA", "CC:CC"}
+
+
+def test_toggle_visible_ignored_adds_or_removes_all_visible() -> None:
+    visible = ["AA:AA", "BB:BB"]
+
+    ignored = toggle_visible_ignored({"AA:AA"}, visible)
+    assert ignored == {"AA:AA", "BB:BB"}
+
+    ignored = toggle_visible_ignored({"AA:AA", "BB:BB", "CC:CC"}, visible)
+    assert ignored == {"CC:CC"}
+
+
 class FakeScanner:
     def __init__(self, detection_callback=None) -> None:
         self.detection_callback = detection_callback
@@ -141,8 +184,6 @@ class FakeScanner:
 
 
 def test_sort_binding_cycles_through_address_mode() -> None:
-    import asyncio
-
     async def run() -> None:
         with patch("bosch_ble.scan.BleakScanner", FakeScanner):
             app = ScannerApp()
@@ -158,5 +199,48 @@ def test_sort_binding_cycles_through_address_mode() -> None:
                 await pilot.pause()
                 assert app.sort_mode is SortMode.ADDRESS
                 app.exit()
+
+    asyncio.run(run())
+
+
+def test_ignore_bindings_update_visible_devices_and_persist(tmp_path: Path) -> None:
+    ignore_path = tmp_path / "ignored.json"
+
+    async def run() -> None:
+        with patch("bosch_ble.scan.BleakScanner", FakeScanner):
+            from bosch_ble import scan
+
+            with scan.DEVICES_LOCK:
+                scan.DEVICES.clear()
+                scan.DEVICES.update(
+                    {
+                        "AA:AA": make_device(name="one", seconds_ago=1),
+                        "BB:BB": make_device(name="two", seconds_ago=2),
+                    }
+                )
+
+            app = ScannerApp(ignore_store_path=ignore_path)
+            async with app.run_test() as pilot:
+                await pilot.pause()
+                assert app.selected_address == "AA:AA"
+
+                await pilot.press("i")
+                await pilot.pause()
+                assert app.ignored_addresses == {"AA:AA"}
+                assert load_ignored_addresses(ignore_path) == {"AA:AA"}
+
+                await pilot.press("I")
+                await pilot.pause()
+                assert app.ignored_addresses == {"AA:AA", "BB:BB"}
+                assert load_ignored_addresses(ignore_path) == {"AA:AA", "BB:BB"}
+
+                await pilot.press("I")
+                await pilot.pause()
+                assert app.ignored_addresses == set()
+                assert load_ignored_addresses(ignore_path) == set()
+                app.exit()
+
+            with scan.DEVICES_LOCK:
+                scan.DEVICES.clear()
 
     asyncio.run(run())

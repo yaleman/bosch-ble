@@ -5,6 +5,9 @@ from copy import deepcopy
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import StrEnum
+import json
+from pathlib import Path
+from rich.text import Text
 from threading import Lock
 from typing import Any
 
@@ -34,6 +37,7 @@ class TableRow:
     rssi: str
     seen: str
     age: str
+    ignored: bool
     age_seconds: float
     sort_name: str
     sort_address: str
@@ -63,6 +67,48 @@ class SortMode(StrEnum):
 DEVICES: dict[str, SeenDevice] = {}
 DEVICES_LOCK = Lock()
 STALE_AFTER_SECONDS = 30.0
+DEFAULT_IGNORE_STORE_PATH = Path.home() / ".bosch-ble" / "ignored_devices.json"
+
+
+def normalize_address(address: str) -> str:
+    return address.upper()
+
+
+def load_ignored_addresses(path: Path) -> set[str]:
+    if not path.exists():
+        return set()
+
+    try:
+        raw = json.loads(path.read_text())
+    except (OSError, json.JSONDecodeError):
+        return set()
+
+    if not isinstance(raw, list):
+        return set()
+
+    return {normalize_address(address) for address in raw if isinstance(address, str)}
+
+
+def save_ignored_addresses(path: Path, addresses: set[str]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    normalized = sorted(normalize_address(address) for address in addresses)
+    path.write_text(json.dumps(normalized, indent=2) + "\n")
+
+
+def toggle_visible_ignored(
+    ignored_addresses: set[str], visible_addresses: list[str]
+) -> set[str]:
+    normalized_visible = {normalize_address(address) for address in visible_addresses}
+    updated = {normalize_address(address) for address in ignored_addresses}
+    if not normalized_visible:
+        return updated
+
+    if normalized_visible.issubset(updated):
+        updated.difference_update(normalized_visible)
+    else:
+        updated.update(normalized_visible)
+
+    return updated
 
 
 def fmt_bytes(data: bytes, limit: int = 32) -> str:
@@ -91,9 +137,13 @@ def build_table_rows(
     now: datetime,
     sort_mode: SortMode,
     hide_stale: bool = False,
+    ignored_addresses: set[str] | None = None,
     stale_after_seconds: float = STALE_AFTER_SECONDS,
 ) -> list[TableRow]:
     rows: list[TableRow] = []
+    ignored_lookup = (
+        set() if ignored_addresses is None else {normalize_address(address) for address in ignored_addresses}
+    )
 
     for address, device in devices.items():
         age_seconds = max((now - device.last_seen).total_seconds(), 0.0)
@@ -107,6 +157,7 @@ def build_table_rows(
                 rssi="-" if device.rssi is None else str(device.rssi),
                 seen=str(device.count),
                 age=format_age(age_seconds),
+                ignored=normalize_address(address) in ignored_lookup,
                 age_seconds=age_seconds,
                 sort_name=(device.name or "").casefold(),
                 sort_address=address.casefold(),
@@ -152,6 +203,7 @@ def build_detail_lines(
     device: SeenDevice | None,
     *,
     now: datetime,
+    ignored: bool = False,
 ) -> list[str]:
     if address is None or device is None:
         return ["No devices seen yet."]
@@ -159,6 +211,7 @@ def build_detail_lines(
     lines = [
         f"Name: {device.name or '-'}",
         f"Address: {address}",
+        f"Ignored: {'yes' if ignored else 'no'}",
         f"RSSI: {device.rssi if device.rssi is not None else '-'}",
         f"Seen: {device.count}",
         f"Age: {format_age(max((now - device.last_seen).total_seconds(), 0.0))}",
@@ -241,14 +294,19 @@ class ScannerApp(App[None]):
         Binding("q", "quit", "Quit"),
         Binding("s", "cycle_sort", "Sort", priority=True),
         Binding("f", "toggle_stale", "Stale", priority=True),
+        Binding("i", "toggle_ignore_selected", "Ignore", priority=True),
+        Binding("I", "toggle_ignore_visible", "Ignore All", priority=True),
         Binding("ctrl+c", "quit", show=False),
     ]
 
-    def __init__(self) -> None:
+    def __init__(self, ignore_store_path: Path | None = None) -> None:
         super().__init__()
         self.sort_mode = SortMode.RECENT
         self.hide_stale = False
         self.selected_address: str | None = None
+        self.visible_addresses: list[str] = []
+        self.ignore_store_path = ignore_store_path or DEFAULT_IGNORE_STORE_PATH
+        self.ignored_addresses = load_ignored_addresses(self.ignore_store_path)
         self.scanner: BleakScanner | None = None
 
     def compose(self) -> ComposeResult:
@@ -283,6 +341,25 @@ class ScannerApp(App[None]):
         self.hide_stale = not self.hide_stale
         self.refresh_view()
 
+    def action_toggle_ignore_selected(self) -> None:
+        if self.selected_address is None:
+            return
+
+        normalized = normalize_address(self.selected_address)
+        if normalized in self.ignored_addresses:
+            self.ignored_addresses.remove(normalized)
+        else:
+            self.ignored_addresses.add(normalized)
+        save_ignored_addresses(self.ignore_store_path, self.ignored_addresses)
+        self.refresh_view()
+
+    def action_toggle_ignore_visible(self) -> None:
+        self.ignored_addresses = toggle_visible_ignored(
+            self.ignored_addresses, self.visible_addresses
+        )
+        save_ignored_addresses(self.ignore_store_path, self.ignored_addresses)
+        self.refresh_view()
+
     def on_data_table_row_highlighted(self, event: DataTable.RowHighlighted) -> None:
         self.selected_address = str(event.row_key.value)
         self.refresh_details()
@@ -301,21 +378,30 @@ class ScannerApp(App[None]):
             now=now,
             sort_mode=self.sort_mode,
             hide_stale=self.hide_stale,
+            ignored_addresses=self.ignored_addresses,
         )
         table = self.query_one("#devices", DataTable)
         table.clear(columns=False)
         for row in rows:
-            table.add_row(row.name, row.address, row.rssi, row.seen, row.age, key=row.address)
+            style = "dim" if row.ignored else ""
+            table.add_row(
+                Text(row.name, style=style),
+                Text(row.address, style=style),
+                Text(row.rssi, style=style),
+                Text(row.seen, style=style),
+                Text(row.age, style=style),
+                key=row.address,
+            )
 
-        visible_addresses = [row.address for row in rows]
-        if not visible_addresses:
+        self.visible_addresses = [row.address for row in rows]
+        if not self.visible_addresses:
             self.selected_address = None
-        elif self.selected_address not in visible_addresses:
-            self.selected_address = visible_addresses[0]
+        elif self.selected_address not in self.visible_addresses:
+            self.selected_address = self.visible_addresses[0]
 
         if self.selected_address is not None:
             table.move_cursor(
-                row=visible_addresses.index(self.selected_address),
+                row=self.visible_addresses.index(self.selected_address),
                 column=0,
                 animate=False,
                 scroll=False,
@@ -338,14 +424,27 @@ class ScannerApp(App[None]):
 
         detail_widget = self.query_one("#details", Static)
         device = None if self.selected_address is None else devices.get(self.selected_address)
-        detail_widget.update("\n".join(build_detail_lines(self.selected_address, device, now=now)))
+        detail_widget.update(
+            "\n".join(
+                build_detail_lines(
+                    self.selected_address,
+                    device,
+                    now=now,
+                    ignored=(
+                        self.selected_address is not None
+                        and normalize_address(self.selected_address) in self.ignored_addresses
+                    ),
+                )
+            )
+        )
 
     def refresh_status(self, *, device_count: int) -> None:
         status = self.query_one("#status", Static)
         stale_state = "hidden" if self.hide_stale else "shown"
         status.update(
             f"Devices:{device_count}  Sort:{self.sort_mode.label}  "
-            f"Stale:{stale_state}  ↑↓ select  s sort  f stale  q quit"
+            f"Ignored:{len(self.ignored_addresses)}  Stale:{stale_state}  "
+            f"↑↓ select  s sort  f stale  i toggle  I toggle-visible  q quit"
         )
 
 
