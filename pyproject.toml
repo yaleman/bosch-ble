@@ -13,6 +13,8 @@ dependencies = [
 dev = ["mypy>=1.20.1", "pytest>=9.0.3", "ruff>=0.15.11", "ty>=0.0.31"]
 
 [project.scripts]
+bosch-ble-bluez-connect = "bosch_ble.bluez:connect_cli"
+bosch-ble-bluez-info = "bosch_ble.bluez:info_cli"
 bosch-ble-dump-gatt = "bosch_ble.dump_gatt:cli"
 bosch-ble-log-chars = "bosch_ble.log_chars:cli"
 bosch-ble-scan = "bosch_ble.scan:cli"

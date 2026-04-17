@@ -14,6 +14,10 @@ def props_to_str(props: list[str | "CharacteristicPropertyName"]) -> str:
     return ",".join(sorted(props))
 
 
+def format_cli_error(exc: Exception) -> str:
+    return str(exc) or type(exc).__name__
+
+
 def retry_message(error: Exception, address: str) -> str | None:
     message = str(error).lower()
     if "failed to discover services" in message:
@@ -91,7 +95,7 @@ def cli() -> None:
     except KeyboardInterrupt:
         raise SystemExit(130)
     except Exception as exc:
-        print(f"Error: {exc}", file=sys.stderr)
+        print(f"Error: {format_cli_error(exc)}", file=sys.stderr)
         raise SystemExit(1)
 
 

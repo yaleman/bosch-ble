@@ -18,6 +18,10 @@ def ts() -> str:
     return datetime.now().isoformat(timespec="seconds")
 
 
+def format_cli_error(exc: Exception) -> str:
+    return str(exc) or type(exc).__name__
+
+
 async def main(address: str, out_file: str = "ble_log.txt") -> None:
     path = Path(out_file)
     print(f"Connecting to {address} ...")
@@ -102,7 +106,7 @@ def cli() -> None:
     except KeyboardInterrupt:
         raise SystemExit(130)
     except Exception as exc:
-        print(f"Error: {exc}", file=sys.stderr)
+        print(f"Error: {format_cli_error(exc)}", file=sys.stderr)
         raise SystemExit(1)
 
 
