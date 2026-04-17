@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta
+from unittest.mock import patch
 
 from bosch_ble.scan import (
+    ScannerApp,
     SeenDevice,
     SortMode,
     build_detail_lines,
@@ -73,6 +75,19 @@ def test_build_table_rows_filters_stale_devices() -> None:
     assert [row.address for row in rows] == ["AA:AA"]
 
 
+def test_build_table_rows_can_sort_by_address() -> None:
+    now = datetime.now()
+    devices = {
+        "CC:CC": make_device(name="zeta", seconds_ago=5),
+        "AA:AA": make_device(name="beta", seconds_ago=4),
+        "BB:BB": make_device(name="alpha", seconds_ago=3),
+    }
+
+    rows = build_table_rows(devices, now=now, sort_mode=SortMode.ADDRESS)
+
+    assert [row.address for row in rows] == ["AA:AA", "BB:BB", "CC:CC"]
+
+
 def test_build_table_rows_uses_placeholder_for_missing_name_and_rssi() -> None:
     now = datetime.now()
     devices = {
@@ -112,3 +127,36 @@ def test_build_detail_lines_returns_empty_state_message() -> None:
     assert build_detail_lines(None, None, now=datetime.now()) == [
         "No devices seen yet."
     ]
+
+
+class FakeScanner:
+    def __init__(self, detection_callback=None) -> None:
+        self.detection_callback = detection_callback
+
+    async def start(self) -> None:
+        return None
+
+    async def stop(self) -> None:
+        return None
+
+
+def test_sort_binding_cycles_through_address_mode() -> None:
+    import asyncio
+
+    async def run() -> None:
+        with patch("bosch_ble.scan.BleakScanner", FakeScanner):
+            app = ScannerApp()
+            async with app.run_test() as pilot:
+                assert app.sort_mode is SortMode.RECENT
+                await pilot.press("s")
+                await pilot.pause()
+                assert app.sort_mode is SortMode.RSSI
+                await pilot.press("s")
+                await pilot.pause()
+                assert app.sort_mode is SortMode.NAME
+                await pilot.press("s")
+                await pilot.pause()
+                assert app.sort_mode is SortMode.ADDRESS
+                app.exit()
+
+    asyncio.run(run())

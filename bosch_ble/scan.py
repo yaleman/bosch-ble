@@ -36,6 +36,7 @@ class TableRow:
     age: str
     age_seconds: float
     sort_name: str
+    sort_address: str
     sort_rssi: int | None
 
 
@@ -43,6 +44,7 @@ class SortMode(StrEnum):
     RECENT = "recent"
     RSSI = "rssi"
     NAME = "name"
+    ADDRESS = "address"
 
     @property
     def label(self) -> str:
@@ -50,6 +52,7 @@ class SortMode(StrEnum):
             SortMode.RECENT: "recent",
             SortMode.RSSI: "rssi",
             SortMode.NAME: "name",
+            SortMode.ADDRESS: "address",
         }[self]
 
     def next(self) -> SortMode:
@@ -106,6 +109,7 @@ def build_table_rows(
                 age=format_age(age_seconds),
                 age_seconds=age_seconds,
                 sort_name=(device.name or "").casefold(),
+                sort_address=address.casefold(),
                 sort_rssi=device.rssi,
             )
         )
@@ -122,13 +126,21 @@ def build_table_rows(
                 row.address,
             )
         )
-    else:
+    elif sort_mode is SortMode.NAME:
         rows.sort(
             key=lambda row: (
                 row.name == "-",
                 row.sort_name,
                 row.age_seconds,
-                row.address,
+                row.sort_address,
+            )
+        )
+    else:
+        rows.sort(
+            key=lambda row: (
+                row.sort_address,
+                row.age_seconds,
+                row.sort_name,
             )
         )
 
@@ -195,6 +207,8 @@ def detection_callback(device: Any, advertisement_data: Any) -> None:
 
 
 class ScannerApp(App[None]):
+    REFRESH_INTERVAL_SECONDS = 1.0
+
     CSS = """
     Screen {
         layout: vertical;
@@ -225,8 +239,8 @@ class ScannerApp(App[None]):
 
     BINDINGS = [
         Binding("q", "quit", "Quit"),
-        Binding("s", "cycle_sort", "Sort"),
-        Binding("f", "toggle_stale", "Stale"),
+        Binding("s", "cycle_sort", "Sort", priority=True),
+        Binding("f", "toggle_stale", "Stale", priority=True),
         Binding("ctrl+c", "quit", show=False),
     ]
 
@@ -252,7 +266,7 @@ class ScannerApp(App[None]):
         table.add_columns("Name", "Address", "RSSI", "Seen", "Age")
         table.focus()
 
-        self.set_interval(0.5, self.refresh_view)
+        self.set_interval(self.REFRESH_INTERVAL_SECONDS, self.refresh_view)
         self.scanner = BleakScanner(detection_callback=detection_callback)
         await self.scanner.start()
         self.refresh_view()
