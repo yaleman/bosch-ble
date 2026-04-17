@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
-from copy import deepcopy
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import StrEnum
@@ -9,7 +8,6 @@ import json
 import os
 from pathlib import Path
 from rich.text import Text
-from threading import Lock
 from typing import Any
 
 from bleak import BleakScanner
@@ -65,8 +63,6 @@ class SortMode(StrEnum):
         return modes[(modes.index(self) + 1) % len(modes)]
 
 
-DEVICES: dict[str, SeenDevice] = {}
-DEVICES_LOCK = Lock()
 STALE_AFTER_SECONDS = 30.0
 DEFAULT_IGNORE_STORE_PATH = Path.home() / ".bosch-ble" / "ignored_devices.json"
 
@@ -158,7 +154,9 @@ def build_table_rows(
 ) -> list[TableRow]:
     rows: list[TableRow] = []
     ignored_lookup = (
-        set() if ignored_addresses is None else {normalize_address(address) for address in ignored_addresses}
+        set()
+        if ignored_addresses is None
+        else {normalize_address(address) for address in ignored_addresses}
     )
 
     for address, device in devices.items():
@@ -262,21 +260,6 @@ def build_detail_lines(
     return lines
 
 
-def detection_callback(device: Any, advertisement_data: Any) -> None:
-    address = getattr(device, "address", "unknown")
-    with DEVICES_LOCK:
-        entry = DEVICES.setdefault(address, SeenDevice())
-        entry.name = (
-            getattr(device, "name", None) or advertisement_data.local_name or entry.name
-        )
-        entry.last_seen = datetime.now()
-        entry.count += 1
-        entry.rssi = advertisement_data.rssi
-        entry.uuids = sorted(advertisement_data.service_uuids or [])
-        entry.manufacturer_data = dict(advertisement_data.manufacturer_data or {})
-        entry.service_data = dict(advertisement_data.service_data or {})
-
-
 class ScannerApp(App[str | None]):
     REFRESH_INTERVAL_SECONDS = 1.0
 
@@ -328,6 +311,7 @@ class ScannerApp(App[str | None]):
         self.ignore_store_path = ignore_store_path or DEFAULT_IGNORE_STORE_PATH
         self.ignored_addresses = load_ignored_addresses(self.ignore_store_path)
         self.scanner: BleakScanner | None = None
+        self.devices: dict[str, SeenDevice] = {}
 
     def compose(self) -> ComposeResult:
         yield Horizontal(
@@ -344,9 +328,22 @@ class ScannerApp(App[str | None]):
         table.focus()
 
         self.set_interval(self.REFRESH_INTERVAL_SECONDS, self.refresh_view)
-        self.scanner = BleakScanner(detection_callback=detection_callback)
+        self.scanner = BleakScanner(detection_callback=self.detection_callback)
         await self.scanner.start()
         self.refresh_view()
+
+    def detection_callback(self, device: Any, advertisement_data: Any) -> None:
+        address = getattr(device, "address", "unknown")
+        entry = self.devices.setdefault(address, SeenDevice())
+        entry.name = (
+            getattr(device, "name", None) or advertisement_data.local_name or entry.name
+        )
+        entry.last_seen = datetime.now()
+        entry.count += 1
+        entry.rssi = advertisement_data.rssi
+        entry.uuids = sorted(advertisement_data.service_uuids or [])
+        entry.manufacturer_data = dict(advertisement_data.manufacturer_data or {})
+        entry.service_data = dict(advertisement_data.service_data or {})
 
     async def on_unmount(self) -> None:
         if self.scanner is not None:
@@ -394,11 +391,8 @@ class ScannerApp(App[str | None]):
 
     def refresh_view(self) -> None:
         now = datetime.now()
-        with DEVICES_LOCK:
-            devices = deepcopy(DEVICES)
-
         rows = build_table_rows(
-            devices,
+            self.devices,
             now=now,
             sort_mode=self.sort_mode,
             hide_stale=self.hide_stale,
@@ -433,23 +427,24 @@ class ScannerApp(App[str | None]):
                 scroll=False,
             )
 
-        self.refresh_details(devices=devices, now=now)
+        self.refresh_details(now=now)
         self.refresh_status(device_count=len(rows))
 
     def refresh_details(
         self,
         *,
-        devices: dict[str, SeenDevice] | None = None,
         now: datetime | None = None,
     ) -> None:
-        if devices is None:
-            with DEVICES_LOCK:
-                devices = deepcopy(DEVICES)
+
         if now is None:
             now = datetime.now()
 
         detail_widget = self.query_one("#details", Static)
-        device = None if self.selected_address is None else devices.get(self.selected_address)
+        device = (
+            None
+            if self.selected_address is None
+            else self.devices.get(self.selected_address)
+        )
         detail_widget.update(
             "\n".join(
                 build_detail_lines(
@@ -458,7 +453,8 @@ class ScannerApp(App[str | None]):
                     now=now,
                     ignored=(
                         self.selected_address is not None
-                        and normalize_address(self.selected_address) in self.ignored_addresses
+                        and normalize_address(self.selected_address)
+                        in self.ignored_addresses
                     ),
                 )
             )

@@ -238,18 +238,14 @@ def test_enter_on_selected_row_exits_with_address(tmp_path: Path) -> None:
 
     async def run() -> None:
         with patch("bosch_ble.scan.BleakScanner", FakeScanner):
-            from bosch_ble import scan
-
-            with scan.DEVICES_LOCK:
-                scan.DEVICES.clear()
-                scan.DEVICES.update(
-                    {
-                        "AA:AA": make_device(name="one", seconds_ago=1),
-                        "BB:BB": make_device(name="two", seconds_ago=2),
-                    }
-                )
-
             app = ScannerApp(ignore_store_path=ignore_path)
+            app.devices.clear()
+            app.devices.update(
+                {
+                    "AA:AA": make_device(name="one", seconds_ago=1),
+                    "BB:BB": make_device(name="two", seconds_ago=2),
+                }
+            )
             async with app.run_test() as pilot:
                 await pilot.pause()
                 assert app.selected_address == "AA:AA"
@@ -257,9 +253,6 @@ def test_enter_on_selected_row_exits_with_address(tmp_path: Path) -> None:
                 await pilot.pause()
 
             assert app.return_value == "AA:AA"
-
-            with scan.DEVICES_LOCK:
-                scan.DEVICES.clear()
 
     asyncio.run(run())
 
@@ -269,18 +262,14 @@ def test_ignore_bindings_update_visible_devices_and_persist(tmp_path: Path) -> N
 
     async def run() -> None:
         with patch("bosch_ble.scan.BleakScanner", FakeScanner):
-            from bosch_ble import scan
-
-            with scan.DEVICES_LOCK:
-                scan.DEVICES.clear()
-                scan.DEVICES.update(
-                    {
-                        "AA:AA": make_device(name="one", seconds_ago=1),
-                        "BB:BB": make_device(name="two", seconds_ago=2),
-                    }
-                )
-
             app = ScannerApp(ignore_store_path=ignore_path)
+            app.devices.clear()
+            app.devices.update(
+                {
+                    "AA:AA": make_device(name="one", seconds_ago=1),
+                    "BB:BB": make_device(name="two", seconds_ago=2),
+                }
+            )
             async with app.run_test() as pilot:
                 await pilot.pause()
                 assert app.selected_address == "AA:AA"
@@ -301,9 +290,6 @@ def test_ignore_bindings_update_visible_devices_and_persist(tmp_path: Path) -> N
                 assert load_ignored_addresses(ignore_path) == set()
                 app.exit()
 
-            with scan.DEVICES_LOCK:
-                scan.DEVICES.clear()
-
     asyncio.run(run())
 
 
@@ -312,19 +298,15 @@ def test_hide_ignored_binding_filters_visible_rows(tmp_path: Path) -> None:
 
     async def run() -> None:
         with patch("bosch_ble.scan.BleakScanner", FakeScanner):
-            from bosch_ble import scan
-
-            with scan.DEVICES_LOCK:
-                scan.DEVICES.clear()
-                scan.DEVICES.update(
-                    {
-                        "AA:AA": make_device(name="one", seconds_ago=1),
-                        "BB:BB": make_device(name="two", seconds_ago=2),
-                    }
-                )
-
             save_ignored_addresses(ignore_path, {"AA:AA"})
             app = ScannerApp(ignore_store_path=ignore_path)
+            app.devices.clear()
+            app.devices.update(
+                {
+                    "AA:AA": make_device(name="one", seconds_ago=1),
+                    "BB:BB": make_device(name="two", seconds_ago=2),
+                }
+            )
             async with app.run_test() as pilot:
                 await pilot.pause()
                 assert app.hide_ignored is False
@@ -340,9 +322,6 @@ def test_hide_ignored_binding_filters_visible_rows(tmp_path: Path) -> None:
                 assert app.hide_ignored is False
                 assert app.visible_addresses == ["AA:AA", "BB:BB"]
                 app.exit()
-
-            with scan.DEVICES_LOCK:
-                scan.DEVICES.clear()
 
     asyncio.run(run())
 
@@ -379,7 +358,9 @@ def test_cli_clears_terminal_after_app_exit() -> None:
             events.append("run")
 
     with patch("bosch_ble.scan.ScannerApp", return_value=FakeApp()):
-        with patch("bosch_ble.scan.clear_terminal", side_effect=lambda: events.append("clear")):
+        with patch(
+            "bosch_ble.scan.clear_terminal", side_effect=lambda: events.append("clear")
+        ):
             cli()
 
     assert events == ["run", "clear"]
@@ -394,7 +375,9 @@ def test_cli_execs_dump_gatt_for_selected_address() -> None:
             return "AA:BB"
 
     with patch("bosch_ble.scan.ScannerApp", return_value=FakeApp()):
-        with patch("bosch_ble.scan.clear_terminal", side_effect=lambda: events.append("clear")):
+        with patch(
+            "bosch_ble.scan.clear_terminal", side_effect=lambda: events.append("clear")
+        ):
             with patch(
                 "bosch_ble.scan.os.execvp",
                 side_effect=lambda cmd, argv: events.append(("exec", cmd, argv)),
