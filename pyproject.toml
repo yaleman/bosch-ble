@@ -7,9 +7,13 @@ requires-python = ">=3.13"
 dependencies = ["bleak>=3.0.1"]
 
 [dependency-groups]
-dev = [
-    "mypy>=1.20.1",
-    "pytest>=9.0.3",
-    "ruff>=0.15.11",
-    "ty>=0.0.31",
-]
+dev = ["mypy>=1.20.1", "pytest>=9.0.3", "ruff>=0.15.11", "ty>=0.0.31"]
+
+[project.scripts]
+bosch-ble-dump-gatt = "bosch_ble.dump_gatt:main"
+bosch-ble-log-chars = "bosch_ble.log_chars:main"
+bosch-ble-scan = "bosch_ble.scan:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
