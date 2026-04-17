@@ -4,7 +4,10 @@ version = "0.1.0"
 description = "Fucking around with Bosch BLE devices"
 readme = "README.md"
 requires-python = ">=3.13"
-dependencies = ["bleak>=3.0.1"]
+dependencies = [
+    "bleak>=3.0.1",
+    "textual>=8.2.3",
+]
 
 [dependency-groups]
 dev = ["mypy>=1.20.1", "pytest>=9.0.3", "ruff>=0.15.11", "ty>=0.0.31"]
