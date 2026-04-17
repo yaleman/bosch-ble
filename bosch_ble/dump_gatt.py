@@ -70,6 +70,7 @@ async def main(address: str) -> None:
     for attempt in range(1, DISCOVERY_RETRY_ATTEMPTS + 1):
         try:
             state = await prepare_connection(address)
+            assert state.device is not None
             async with BleakClient(state.device, timeout=20.0) as client:
                 print(f"Connected: {client.is_connected}")
                 if not client.is_connected:
@@ -98,7 +99,9 @@ async def main(address: str) -> None:
                                 f"    [DESC] handle={descriptor.handle} uuid={descriptor.uuid}"
                             )
                             try:
-                                dval = await client.read_gatt_descriptor(descriptor.handle)
+                                dval = await client.read_gatt_descriptor(
+                                    descriptor.handle
+                                )
                                 print(
                                     f"           value={bytes(dval).hex()} raw={bytes(dval)!r}"
                                 )

@@ -1,0 +1,14 @@
+[tools]
+uv = "latest"
+
+[tasks.ruff]
+run = "uv run ruff check"
+
+[tasks.ty]
+run = "uv run ty check"
+
+[tasks.test]
+run = "uv run pytest"
+
+[tasks.check]
+depends = ["ruff", "ty", "test"]
