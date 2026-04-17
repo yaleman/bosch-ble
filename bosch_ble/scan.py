@@ -320,7 +320,7 @@ class ScannerApp(App[str | None]):
 
     def __init__(self, ignore_store_path: Path | None = None) -> None:
         super().__init__()
-        self.sort_mode = SortMode.RECENT
+        self.sort_mode = SortMode.ADDRESS
         self.hide_stale = False
         self.hide_ignored = False
         self.selected_address: str | None = None

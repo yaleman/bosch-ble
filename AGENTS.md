@@ -18,6 +18,7 @@
 - Reduce code sprawl while working; do not add layers without a clear need.
 - Use package managers for dependency changes.
 - If JavaScript tooling appears, prefer `pnpm`.
+- When you finish a request, commit and push the changes.
 
 ## Output Guidance
 - Scanner output should favor compact table/TUI-style terminal views over verbose scrolling logs.

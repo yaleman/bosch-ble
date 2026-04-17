@@ -218,6 +218,9 @@ def test_sort_binding_cycles_through_address_mode() -> None:
         with patch("bosch_ble.scan.BleakScanner", FakeScanner):
             app = ScannerApp()
             async with app.run_test() as pilot:
+                assert app.sort_mode is SortMode.ADDRESS
+                await pilot.press("s")
+                await pilot.pause()
                 assert app.sort_mode is SortMode.RECENT
                 await pilot.press("s")
                 await pilot.pause()
@@ -225,9 +228,6 @@ def test_sort_binding_cycles_through_address_mode() -> None:
                 await pilot.press("s")
                 await pilot.pause()
                 assert app.sort_mode is SortMode.NAME
-                await pilot.press("s")
-                await pilot.pause()
-                assert app.sort_mode is SortMode.ADDRESS
                 app.exit()
 
     asyncio.run(run())
