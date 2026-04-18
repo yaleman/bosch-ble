@@ -10,6 +10,8 @@ from typing import Any
 
 from bleak import BleakClient
 
+from bosch_ble import dump_gatt
+
 
 STOP = asyncio.Event()
 
@@ -36,7 +38,10 @@ async def main(address: str, out_file: str = "ble_log.txt") -> None:
         except NotImplementedError:
             pass
 
-    async with BleakClient(address, timeout=20.0) as client:
+    state = await dump_gatt.prepare_connection(address)
+    target = state.device if state.device is not None else state.address
+
+    async with BleakClient(target, timeout=20.0) as client:
         print(f"Connected: {client.is_connected}")
         if not client.is_connected:
             raise RuntimeError("Failed to connect")

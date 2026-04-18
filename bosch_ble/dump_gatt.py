@@ -45,7 +45,7 @@ async def resolve_device(address: str) -> bluez.BluezState:
 async def prepare_connection(address: str) -> bluez.BluezState:
     state = await resolve_device(address)
     connected_state = bluez.assist_connection(address)
-    if connected_state.services_resolved is not True:
+    if bluez.busctl_available() and connected_state.services_resolved is not True:
         print(f"Waiting for BlueZ services for {address} ...")
         connected_state = await bluez.wait_for_services(address)
     return bluez.BluezState(
