@@ -39,8 +39,6 @@ async def resolve_device(address: str) -> bluez.BluezState:
         state = await bluez.preflight_device(address, scan_timeout=REDISCOVERY_TIMEOUT)
         bluez.print_preflight_summary(state)
 
-    if state.device is None:
-        raise RuntimeError(f"Device with address {address} was not found.")
     return state
 
 
@@ -70,8 +68,8 @@ async def main(address: str) -> None:
     for attempt in range(1, DISCOVERY_RETRY_ATTEMPTS + 1):
         try:
             state = await prepare_connection(address)
-            assert state.device is not None
-            async with BleakClient(state.device, timeout=20.0) as client:
+            target = state.device if state.device is not None else state.address
+            async with BleakClient(target, timeout=20.0) as client:
                 print(f"Connected: {client.is_connected}")
                 if not client.is_connected:
                     raise RuntimeError("Failed to connect")

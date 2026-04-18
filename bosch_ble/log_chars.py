@@ -23,6 +23,8 @@ def format_cli_error(exc: Exception) -> str:
 
 
 async def main(address: str, out_file: str = "ble_log.txt") -> None:
+    global STOP
+    STOP = asyncio.Event()
     path = Path(out_file)
     print(f"Connecting to {address} ...")
     print(f"Logging to {path.resolve()}")

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from pathlib import Path
 from subprocess import CompletedProcess
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
@@ -148,7 +149,25 @@ def test_dump_gatt_main_runs_preflight_and_assisted_connect_before_bleak_client(
     ]
 
 
-def test_dump_gatt_main_errors_cleanly_when_scan_cannot_find_device() -> None:
+def test_dump_gatt_main_can_connect_by_address_when_scan_cannot_find_device(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    targets: list[object] = []
+
+    class FakeClient:
+        def __init__(self, address_or_ble_device, timeout: float = 20.0) -> None:
+            targets.append(address_or_ble_device)
+            self.address_or_ble_device = address_or_ble_device
+            self.timeout = timeout
+            self.is_connected = True
+            self.services = []
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb) -> None:
+            return None
+
     async def run() -> None:
         missing_state = bluez.BluezState(
             address="AA:BB",
@@ -162,13 +181,35 @@ def test_dump_gatt_main_errors_cleanly_when_scan_cannot_find_device() -> None:
             bluetoothctl=CompletedProcess(["bluetoothctl"], 0, stdout="not available\n", stderr=""),
             busctl=None,
         )
-        with patch.object(dump_gatt.bluez, "preflight_device", new=AsyncMock(return_value=missing_state)):
-            with pytest.raises(RuntimeError) as excinfo:
-                await dump_gatt.main("AA:BB")
-
-        assert str(excinfo.value) == "Device with address AA:BB was not found."
+        connected_state = bluez.BluezState(
+            address="AA:BB",
+            visible=False,
+            device=None,
+            name="sensor",
+            paired=False,
+            trusted=True,
+            connected=True,
+            services_resolved=True,
+            bluetoothctl=CompletedProcess(["bluetoothctl"], 0, stdout="", stderr=""),
+            busctl=CompletedProcess(["busctl"], 0, stdout="", stderr=""),
+        )
+        with patch.object(
+            dump_gatt.bluez,
+            "preflight_device",
+            new=AsyncMock(return_value=missing_state),
+        ):
+            with patch.object(
+                dump_gatt.bluez,
+                "assist_connection",
+                return_value=connected_state,
+            ):
+                with patch.object(dump_gatt, "BleakClient", FakeClient):
+                    await dump_gatt.main("AA:BB")
 
     asyncio.run(run())
+    assert targets == ["AA:BB"]
+    output = capsys.readouterr().out
+    assert "Connecting to AA:BB ..." in output
 
 
 def test_dump_gatt_main_retries_when_service_discovery_disconnects(
@@ -365,6 +406,53 @@ def test_log_chars_cli_runs_async_main_with_explicit_output() -> None:
             log_chars.cli()
 
     patched_main.assert_called_once_with("AA:BB", "out.txt")
+
+
+def test_log_chars_main_resets_stop_event_between_runs(
+    tmp_path: Path,
+) -> None:
+    read_events: list[str] = []
+
+    class FakeCharacteristic:
+        uuid = "1234"
+        properties = ["read"]
+
+    class FakeService:
+        characteristics = [FakeCharacteristic()]
+
+    class FakeClient:
+        def __init__(self, address: str, timeout: float = 20.0) -> None:
+            self.address = address
+            self.timeout = timeout
+            self.is_connected = True
+            self.services = [FakeService()]
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb) -> None:
+            return None
+
+        async def read_gatt_char(self, uuid: str) -> bytes:
+            read_events.append(uuid)
+            return b"\x01"
+
+    async def fake_sleep(delay: float) -> None:
+        log_chars.STOP.set()
+
+    async def run_once() -> None:
+        with patch.object(log_chars, "BleakClient", FakeClient):
+            with patch.object(
+                log_chars.asyncio,
+                "sleep",
+                new=AsyncMock(side_effect=fake_sleep),
+            ):
+                await log_chars.main("AA:BB", str(tmp_path / "ble_log.txt"))
+
+    asyncio.run(run_once())
+    asyncio.run(run_once())
+
+    assert read_events == ["1234", "1234"]
 
 
 def test_bluez_preflight_cli_shows_usage_without_address(
