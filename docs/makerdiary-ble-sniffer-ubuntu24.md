@@ -3,6 +3,7 @@
 This guide sets up a Makerdiary `nRF52840 MDK USB Dongle` as a `nRF Sniffer for Bluetooth LE` on Ubuntu 24.04.
 
 It is written for this repo's Bosch debugging workflow:
+
 - capture a fresh phone-to-bike pairing
 - capture the first successful reconnect after pairing
 - compare that traffic with what BlueZ on `m710qa` fails to do
@@ -16,6 +17,7 @@ It is written for this repo's Bosch debugging workflow:
 - the latest `nRF Sniffer for Bluetooth LE` package
 
 Official references:
+
 - [Makerdiary installation guide](https://wiki.makerdiary.com/nrf52840-mdk-usb-dongle/guides/ble-sniffer/installation/)
 - [Makerdiary running guide](https://wiki.makerdiary.com/nrf52840-mdk-usb-dongle/guides/ble-sniffer/running-sniffer/)
 - [Nordic nRF Sniffer user guide](https://infocenter.nordicsemi.com/pdf/nRF_Sniffer_UG_v2.2.pdf)
@@ -43,13 +45,14 @@ Log out and back in before continuing.
 Download the latest `nRF Sniffer for Bluetooth LE` package from the Nordic/Makerdiary docs linked above, then extract it:
 
 ```bash
-mkdir -p ~/src
-cd ~/src
-unzip ~/Downloads/nrf_sniffer_for_bluetooth_le_*.zip
-cd nrf_sniffer_for_bluetooth_le_*
+git clone https://github.com/makerdiary/nrf52840-mdk-usb-dongle
+cd nrf52840-mdk-usb-dongle/tools/ble_sniffer/extcap
+uv venv
+uv pip install -r requirements.txt
 ```
 
 After extraction, the files you care about are:
+
 - `firmware/ble_sniffer/`
 - `tools/ble_sniffer/extcap/`
 - `tools/ble_sniffer/Profile_nRF_Sniffer_Bluetooth_LE/`
@@ -70,7 +73,7 @@ cp firmware/ble_sniffer/nrf_sniffer_for_bluetooth_le_*.uf2 /media/"$USER"/UF2BOO
 sync
 ```
 
-5. Unplug and replug the dongle.
+1. Unplug and replug the dongle.
 
 After it has been programmed once, the button becomes reset. To re-enter bootloader mode later, plug it in and double-click the button.
 
@@ -79,11 +82,12 @@ After it has been programmed once, the button becomes reset. To re-enter bootloa
 From the extracted sniffer package:
 
 ```bash
-cd ~/src/nrf_sniffer_for_bluetooth_le_*/tools/ble_sniffer/extcap
+cd ~/nrf_sniffer_for_bluetooth_le_*/tools/ble_sniffer/extcap
 python3 -m pip install --user -r requirements.txt
 ```
 
 Find Wireshark's personal `extcap` directory from:
+
 - `Wireshark -> Help -> About Wireshark -> Folders -> Personal Extcap path`
 
 Create it if needed, then copy the extcap files there:
@@ -102,7 +106,7 @@ Create the profile directory and copy the bundled sniffer profile:
 
 ```bash
 mkdir -p ~/.config/wireshark/profiles
-cp -r ~/src/nrf_sniffer_for_bluetooth_le_*/tools/ble_sniffer/Profile_nRF_Sniffer_Bluetooth_LE \
+cp -r ~/nrf52840-mdk-usb-dongle/tools/ble_sniffer/Profile_nRF_Sniffer_Bluetooth_LE \
   ~/.config/wireshark/profiles/
 ```
 
@@ -120,6 +124,7 @@ Run the extcap script directly:
 ```
 
 Expected result:
+
 - output includes `nRF Sniffer for Bluetooth LE`
 - no Python import errors
 - no permissions errors opening the dongle
@@ -173,10 +178,12 @@ High-value events:
 - disconnect reason if the bike drops the link
 
 The Bosch device we have seen usually advertises:
+
 - `Name: smart system eBike`
 - `UUID 0xfe02`
 
 BlueZ on `m710qa` also already has cached UUIDs including:
+
 - `1800`
 - `1801`
 - `180a`
@@ -197,21 +204,25 @@ The main question is whether the phone performs a required authenticated write o
 ## 11. Quick Troubleshooting
 
 No `UF2BOOT` volume:
+
 - unplug the dongle
 - hold the button while plugging it in
 - if already flashed before, plug it in and double-click the button
 
 No `nRF Sniffer` interface in Wireshark:
+
 - rerun `nrf_sniffer_ble.sh --extcap-interfaces`
 - confirm the files are in the `Personal Extcap path`
 - confirm the script is executable
 - restart Wireshark
 
 Permissions errors:
+
 - confirm your user is in `wireshark` and `dialout`
 - log out and back in
 
 Dongle not detected:
+
 - try a different USB port
 - avoid USB hubs for the first setup
 - verify the board is running the sniffer `.uf2`, not some other firmware
@@ -225,10 +236,12 @@ Save captures with names like:
 - `captures/bosch-linux-connect-failure.pcapng`
 
 Once you have a capture, the next job is to compare:
+
 - phone's first successful connect sequence
 - Linux's failed connect sequence on `m710qa`
 
 That comparison should tell us whether the missing piece is:
+
 - security
 - an app-level initialization write
 - or a transport-level disconnect before services are usable
