@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-host="${1:-m710qa.local}"
+host="${1:-${REMOTE_HOST:?REMOTE_HOST must be set}}"
 
 ssh "$host" 'bash -se' <<'EOF'
 set -euo pipefail
@@ -22,9 +22,9 @@ if [ -f "$state_dir/current_sniffer_pid" ]; then
   fi
   rm -f \
     "$state_dir/current_sniffer_pid" \
-    "$state_dir/current_sink_pid" \
     "$state_dir/current_capture" \
-    "$state_dir/current_fifo"
+    "$state_dir/current.log" \
+    "$state_dir/capture_sniffer.py"
 fi
 
 capture_path="$captures_dir/bosch-pairing-$(date +%F-%H%M%S).pcap"

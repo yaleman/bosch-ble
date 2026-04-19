@@ -1,0 +1,25 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+host="${1:-${REMOTE_HOST:?REMOTE_HOST must be set}}"
+local_captures_dir="captures"
+
+mkdir -p "$local_captures_dir"
+
+remote_paths=()
+while IFS= read -r remote_path; do
+  remote_paths+=("$remote_path")
+done < <(
+  ssh "$host" 'find "$HOME/captures" -maxdepth 1 -type f \( -name "*.pcap" -o -name "*.pcapng" \) | sort'
+)
+
+if [ "${#remote_paths[@]}" -eq 0 ]; then
+  echo "no remote captures found on $host" >&2
+  exit 1
+fi
+
+for remote_path in "${remote_paths[@]}"; do
+  scp "$host:$remote_path" "$local_captures_dir/"
+done
+
+echo "copied ${#remote_paths[@]} capture(s) to $local_captures_dir/"

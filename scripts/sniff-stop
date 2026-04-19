@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-host="${1:-m710qa.local}"
+host="${1:-${REMOTE_HOST:?REMOTE_HOST must be set}}"
 
 ssh "$host" 'bash -se' <<'EOF'
 set -euo pipefail
