@@ -5,14 +5,29 @@ import asyncio
 import shutil
 import subprocess
 import sys
+from contextlib import asynccontextmanager
 from dataclasses import dataclass
-from typing import Any
+from typing import Annotated, Any
+from uuid import uuid4
 
 from bleak import BleakScanner
+from dbus_fast import DBusError
+from dbus_fast.annotations import DBusObjectPath, DBusSignature, DBusStr, DBusUInt16, DBusUInt32
+from dbus_fast.aio import MessageBus
+from dbus_fast.constants import BusType
+from dbus_fast.service import ServiceInterface, method
 
 DEFAULT_SCAN_TIMEOUT = 5.0
 DEFAULT_WAIT_TIMEOUT = 8.0
 DEFAULT_WAIT_INTERVAL = 1.0
+BLUEZ_SERVICE = "org.bluez"
+BLUEZ_ROOT_PATH = "/org/bluez"
+BLUEZ_AGENT_INTERFACE = "org.bluez.Agent1"
+BLUEZ_AGENT_MANAGER_INTERFACE = "org.bluez.AgentManager1"
+BLUEZ_AGENT_CAPABILITY = "DisplayYesNo"
+BLUEZ_AGENT_BASE_PATH = "/org/bosch_ble"
+BLUEZ_REJECTED_ERROR = "org.bluez.Error.Rejected"
+DBusEmpty = Annotated[None, DBusSignature("")]
 
 
 @dataclass(slots=True)
@@ -36,6 +51,29 @@ def run_command(argv: list[str], timeout: float = 15.0) -> subprocess.CompletedP
         text=True,
         timeout=timeout,
         check=False,
+    )
+
+
+async def run_command_async(
+    argv: list[str],
+    timeout: float = 15.0,
+) -> subprocess.CompletedProcess[str]:
+    process = await asyncio.create_subprocess_exec(
+        *argv,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    try:
+        stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=timeout)
+    except TimeoutError as exc:
+        process.kill()
+        await process.communicate()
+        raise subprocess.TimeoutExpired(argv, timeout) from exc
+    return subprocess.CompletedProcess(
+        argv,
+        process.returncode,
+        stdout=stdout.decode(),
+        stderr=stderr.decode(),
     )
 
 
@@ -194,7 +232,91 @@ def summarize_failure(result: subprocess.CompletedProcess[str]) -> str:
     return f"exit code {result.returncode}"
 
 
-def assist_connection(address: str, verbose: bool = False) -> BluezState:
+class AutoConfirmBluezAgent(ServiceInterface):
+    def __init__(self, address: str) -> None:
+        super().__init__(BLUEZ_AGENT_INTERFACE)
+        self.address = address.upper()
+        self.device_suffix = device_object_suffix(address)
+
+    def _authorize_device(self, device: str) -> None:
+        if device.endswith(self.device_suffix):
+            return
+        raise DBusError(BLUEZ_REJECTED_ERROR, f"Refusing pairing request for unexpected device {device}")
+
+    @method()
+    def Release(self) -> DBusEmpty:
+        return None
+
+    @method()
+    def RequestPinCode(self, device: DBusObjectPath) -> DBusStr:
+        self._authorize_device(device)
+        raise DBusError(BLUEZ_REJECTED_ERROR, "PIN code entry is not supported")
+
+    @method()
+    def DisplayPinCode(self, device: DBusObjectPath, pincode: DBusStr) -> DBusEmpty:
+        self._authorize_device(device)
+        return None
+
+    @method()
+    def RequestPasskey(self, device: DBusObjectPath) -> DBusUInt32:
+        self._authorize_device(device)
+        raise DBusError(BLUEZ_REJECTED_ERROR, "Passkey entry is not supported")
+
+    @method()
+    def DisplayPasskey(
+        self,
+        device: DBusObjectPath,
+        passkey: DBusUInt32,
+        entered: DBusUInt16,
+    ) -> DBusEmpty:
+        self._authorize_device(device)
+        return None
+
+    @method()
+    def RequestConfirmation(self, device: DBusObjectPath, passkey: DBusUInt32) -> DBusEmpty:
+        self._authorize_device(device)
+        return None
+
+    @method()
+    def RequestAuthorization(self, device: DBusObjectPath) -> DBusEmpty:
+        self._authorize_device(device)
+        return None
+
+    @method()
+    def AuthorizeService(self, device: DBusObjectPath, uuid: DBusStr) -> DBusEmpty:
+        self._authorize_device(device)
+        return None
+
+    @method()
+    def Cancel(self) -> DBusEmpty:
+        return None
+
+
+@asynccontextmanager
+async def pairing_agent(address: str):
+    bus = await MessageBus(bus_type=BusType.SYSTEM).connect()
+    path = f"{BLUEZ_AGENT_BASE_PATH}/{uuid4().hex}"
+    agent = AutoConfirmBluezAgent(address)
+    bus.export(path, agent)
+    introspection = await bus.introspect(BLUEZ_SERVICE, BLUEZ_ROOT_PATH)
+    proxy = bus.get_proxy_object(BLUEZ_SERVICE, BLUEZ_ROOT_PATH, introspection)
+    manager = proxy.get_interface(BLUEZ_AGENT_MANAGER_INTERFACE)
+    await manager.call_register_agent(path, BLUEZ_AGENT_CAPABILITY)
+    try:
+        await manager.call_request_default_agent(path)
+        try:
+            yield
+        finally:
+            try:
+                await manager.call_unregister_agent(path)
+            except Exception:
+                pass
+    finally:
+        bus.unexport(path, agent)
+        bus.disconnect()
+
+
+async def assist_connection(address: str, verbose: bool = False) -> BluezState:
     steps = [
         ("bluetoothctl info", ["bluetoothctl", "info", address]),
         ("bluetoothctl pair", ["bluetoothctl", "pair", address]),
@@ -203,14 +325,15 @@ def assist_connection(address: str, verbose: bool = False) -> BluezState:
     ]
 
     connect_result: subprocess.CompletedProcess[str] | None = None
-    for title, argv in steps:
-        result = run_command(argv)
-        if verbose:
-            print_section(title, result)
-        if argv[:2] == ["bluetoothctl", "connect"]:
-            connect_result = result
+    async with pairing_agent(address):
+        for title, argv in steps:
+            result = await run_command_async(argv)
+            if verbose:
+                print_section(title, result)
+            if argv[:2] == ["bluetoothctl", "connect"]:
+                connect_result = result
 
-    state = read_device_state(address)
+    state = await asyncio.to_thread(read_device_state, address)
     if verbose:
         print_section("bluetoothctl info", state.bluetoothctl)
         if state.busctl is not None:
@@ -337,7 +460,7 @@ def connect_cli() -> None:
         raise SystemExit(2)
 
     try:
-        assist_connection(sys.argv[1], verbose=True)
+        asyncio.run(assist_connection(sys.argv[1], verbose=True))
     except KeyboardInterrupt:
         raise SystemExit(130)
     except Exception as exc:

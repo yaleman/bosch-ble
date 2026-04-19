@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from contextlib import asynccontextmanager
 from pathlib import Path
 from subprocess import CompletedProcess
 from types import SimpleNamespace
@@ -205,15 +206,79 @@ def test_assist_connection_accepts_connected_state_after_local_abort() -> None:
         busctl=None,
     )
 
-    with patch.object(
-        bluez,
-        "run_command",
-        side_effect=[info_result, pair_result, trust_result, connect_result],
-    ):
-        with patch.object(bluez, "read_device_state", return_value=connected_state):
-            result = bluez.assist_connection("AA:BB")
+    @asynccontextmanager
+    async def fake_pairing_agent(address: str):
+        yield
 
-    assert result is connected_state
+    async def run() -> None:
+        with patch.object(
+            bluez,
+            "run_command_async",
+            side_effect=[info_result, pair_result, trust_result, connect_result],
+        ):
+            with patch.object(bluez, "pairing_agent", side_effect=fake_pairing_agent):
+                with patch.object(bluez, "read_device_state", return_value=connected_state):
+                    result = await bluez.assist_connection("AA:BB")
+
+        assert result is connected_state
+
+    asyncio.run(run())
+
+
+def test_assist_connection_runs_pair_trust_connect_inside_pairing_agent() -> None:
+    events: list[object] = []
+    info_result = CompletedProcess(["bluetoothctl", "info", "AA:BB"], 0, stdout="", stderr="")
+    pair_result = CompletedProcess(["bluetoothctl", "pair", "AA:BB"], 0, stdout="", stderr="")
+    trust_result = CompletedProcess(["bluetoothctl", "trust", "AA:BB"], 0, stdout="", stderr="")
+    connect_result = CompletedProcess(["bluetoothctl", "connect", "AA:BB"], 0, stdout="Connected: yes\n", stderr="")
+    connected_state = bluez.BluezState(
+        address="AA:BB",
+        visible=True,
+        device=None,
+        name="sensor",
+        paired=True,
+        trusted=True,
+        connected=True,
+        services_resolved=None,
+        bluetoothctl=CompletedProcess(["bluetoothctl"], 0, stdout="Connected: yes\n", stderr=""),
+        busctl=None,
+    )
+
+    @asynccontextmanager
+    async def fake_pairing_agent(address: str):
+        events.append(("agent_enter", address))
+        try:
+            yield
+        finally:
+            events.append(("agent_exit", address))
+
+    async def run() -> None:
+        async def fake_run_command(argv: list[str], timeout: float = 15.0) -> CompletedProcess[str]:
+            events.append(tuple(argv))
+            results = {
+                ("bluetoothctl", "info", "AA:BB"): info_result,
+                ("bluetoothctl", "pair", "AA:BB"): pair_result,
+                ("bluetoothctl", "trust", "AA:BB"): trust_result,
+                ("bluetoothctl", "connect", "AA:BB"): connect_result,
+            }
+            return results[tuple(argv)]
+
+        with patch.object(bluez, "pairing_agent", side_effect=fake_pairing_agent):
+            with patch.object(bluez, "run_command_async", side_effect=fake_run_command):
+                with patch.object(bluez, "read_device_state", return_value=connected_state):
+                    result = await bluez.assist_connection("AA:BB")
+
+        assert result is connected_state
+
+    asyncio.run(run())
+    assert events == [
+        ("agent_enter", "AA:BB"),
+        ("bluetoothctl", "info", "AA:BB"),
+        ("bluetoothctl", "pair", "AA:BB"),
+        ("bluetoothctl", "trust", "AA:BB"),
+        ("bluetoothctl", "connect", "AA:BB"),
+        ("agent_exit", "AA:BB"),
+    ]
 
 
 def test_dump_gatt_main_runs_preflight_and_assisted_connect_before_bleak_client(
@@ -282,7 +347,7 @@ def test_dump_gatt_main_runs_preflight_and_assisted_connect_before_bleak_client(
                 with patch.object(
                     dump_gatt.bluez,
                     "assist_connection",
-                    side_effect=lambda address: call_order.append(("assist_connection", address)) or connected_state,
+                    new=AsyncMock(side_effect=lambda address: call_order.append(("assist_connection", address)) or connected_state),
                 ):
                     with patch.object(
                         dump_gatt.bluez,
@@ -356,7 +421,7 @@ def test_dump_gatt_main_can_connect_by_address_when_scan_cannot_find_device(
             with patch.object(
                 dump_gatt.bluez,
                 "assist_connection",
-                return_value=connected_state,
+                new=AsyncMock(return_value=connected_state),
             ):
                 with patch.object(dump_gatt, "BleakClient", FakeClient):
                     await dump_gatt.main("AA:BB")
@@ -422,7 +487,7 @@ def test_dump_gatt_main_skips_wait_when_service_resolution_is_unavailable(
                 with patch.object(
                     dump_gatt.bluez,
                     "assist_connection",
-                    return_value=connected_state,
+                    new=AsyncMock(return_value=connected_state),
                 ):
                     with patch.object(
                         dump_gatt.bluez,
@@ -474,7 +539,7 @@ def test_dump_gatt_main_retries_when_service_discovery_disconnects(
             busctl=CompletedProcess(["busctl"], 0, stdout="", stderr=""),
         )
         with patch.object(dump_gatt.bluez, "preflight_device", new=AsyncMock(return_value=ready_state)):
-            with patch.object(dump_gatt.bluez, "assist_connection", return_value=ready_state):
+            with patch.object(dump_gatt.bluez, "assist_connection", new=AsyncMock(return_value=ready_state)):
                 with patch.object(dump_gatt.bluez, "wait_for_services", new=AsyncMock(return_value=ready_state)):
                     with patch.object(dump_gatt, "BleakClient", FakeClient):
                         await dump_gatt.main("AA:BB")
@@ -522,7 +587,7 @@ def test_dump_gatt_main_retries_when_bluez_reports_operation_in_progress(
             busctl=CompletedProcess(["busctl"], 0, stdout="", stderr=""),
         )
         with patch.object(dump_gatt.bluez, "preflight_device", new=AsyncMock(return_value=ready_state)):
-            with patch.object(dump_gatt.bluez, "assist_connection", return_value=ready_state):
+            with patch.object(dump_gatt.bluez, "assist_connection", new=AsyncMock(return_value=ready_state)):
                 with patch.object(dump_gatt.bluez, "wait_for_services", new=AsyncMock(return_value=ready_state)):
                     with patch.object(dump_gatt, "BleakClient", FakeClient):
                         await dump_gatt.main("AA:BB")
@@ -551,7 +616,7 @@ def test_dump_gatt_main_fails_cleanly_when_bluez_connect_fails() -> None:
             with patch.object(
                 dump_gatt.bluez,
                 "assist_connection",
-                side_effect=RuntimeError("BlueZ connect failed for AA:BB: le-connection-abort-by-local"),
+                new=AsyncMock(side_effect=RuntimeError("BlueZ connect failed for AA:BB: le-connection-abort-by-local")),
             ):
                 with pytest.raises(RuntimeError) as excinfo:
                     await dump_gatt.main("AA:BB")
@@ -589,7 +654,7 @@ def test_dump_gatt_main_fails_cleanly_when_services_never_resolve() -> None:
         )
         with patch.object(dump_gatt.bluez, "preflight_device", new=AsyncMock(return_value=preflight_state)):
             with patch("bosch_ble.bluez.shutil.which", return_value="/usr/bin/busctl"):
-                with patch.object(dump_gatt.bluez, "assist_connection", return_value=connected_state):
+                with patch.object(dump_gatt.bluez, "assist_connection", new=AsyncMock(return_value=connected_state)):
                     with patch.object(
                         dump_gatt.bluez,
                         "wait_for_services",
@@ -987,42 +1052,27 @@ def test_bluez_info_cli_runs_devices_info_and_busctl(
 def test_bluez_connect_cli_runs_pair_trust_connect_sequence(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    calls: list[list[str]] = []
-
-    def fake_run(argv: list[str], timeout: float = 0.0) -> CompletedProcess[str]:
-        calls.append(argv)
-        return CompletedProcess(argv, 0, stdout="ok\n", stderr="")
-
-    with patch.object(bluez, "run_command", side_effect=fake_run):
+    with patch.object(bluez, "assist_connection", new=AsyncMock()) as assist_connection:
         with patch("sys.argv", ["bosch-ble-bluez-connect", "AA:BB"]):
             bluez.connect_cli()
 
-    assert calls == [
-        ["bluetoothctl", "info", "AA:BB"],
-        ["bluetoothctl", "pair", "AA:BB"],
-        ["bluetoothctl", "trust", "AA:BB"],
-        ["bluetoothctl", "connect", "AA:BB"],
-        ["bluetoothctl", "info", "AA:BB"],
-    ]
-    output = capsys.readouterr().out
-    assert "== bluetoothctl connect ==" in output
-    assert "ok" in output
+    assist_connection.assert_awaited_once_with("AA:BB", verbose=True)
+    assert capsys.readouterr().out == ""
 
 
 def test_bluez_connect_cli_exits_nonzero_when_connect_fails(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    def fake_run(argv: list[str], timeout: float = 0.0) -> CompletedProcess[str]:
-        if argv[:2] == ["bluetoothctl", "connect"]:
-            return CompletedProcess(argv, 1, stdout="", stderr="Failed\n")
-        return CompletedProcess(argv, 0, stdout="ok\n", stderr="")
-
-    with patch.object(bluez, "run_command", side_effect=fake_run):
+    with patch.object(
+        bluez,
+        "assist_connection",
+        new=AsyncMock(side_effect=RuntimeError("BlueZ connect failed for AA:BB: Failed")),
+    ):
         with patch("sys.argv", ["bosch-ble-bluez-connect", "AA:BB"]):
             with pytest.raises(SystemExit) as excinfo:
                 bluez.connect_cli()
 
     assert excinfo.value.code == 1
-    output = capsys.readouterr().out
-    assert "== bluetoothctl connect ==" in output
-    assert "Failed" in output
+    output = capsys.readouterr()
+    assert output.out == ""
+    assert output.err == "Error: BlueZ connect failed for AA:BB: Failed\n"
