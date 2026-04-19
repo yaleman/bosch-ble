@@ -12,3 +12,12 @@ run = "uv run pytest"
 
 [tasks.check]
 depends = ["ruff", "ty", "test"]
+
+[tasks.sniff-start]
+run = "./scripts/sniff-start"
+
+[tasks.sniff-stop]
+run = "./scripts/sniff-stop"
+
+[tasks.sniff-copy]
+run = "./scripts/sniff-copy"

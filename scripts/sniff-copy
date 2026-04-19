@@ -1,0 +1,14 @@
+#!/bin/bash
+set -euo pipefail
+
+
+
+# host="${1:-${REMOTE_HOST:?REMOTE_HOST must be set}}"
+local_captures_dir="captures"
+
+mkdir -p "$local_captures_dir"
+
+echo "Copying capture files from $REMOTE_HOST to $local_captures_dir..."
+
+rsync -av --include='*.pcap' --include='*.pcapng' --exclude='*' \
+    "$REMOTE_HOST:~/captures/" "$local_captures_dir/"

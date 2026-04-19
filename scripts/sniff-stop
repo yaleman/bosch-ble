@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+host="${1:-${REMOTE_HOST:?REMOTE_HOST must be set}}"
+
+ssh "${host}" 'killall tshark'

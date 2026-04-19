@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ssh "${REMOTE_HOST}" 'tshark -i /dev/ttyACM0-None -w ~/captures/bosch-$(date +%F-%H%M%S).pcapng'

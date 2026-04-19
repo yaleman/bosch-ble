@@ -202,6 +202,16 @@ def test_toggle_visible_ignored_adds_or_removes_all_visible() -> None:
     assert ignored == {"CC:CC"}
 
 
+def test_scanner_app_instances_do_not_share_device_state() -> None:
+    first = ScannerApp()
+    second = ScannerApp()
+
+    first.devices["AA:AA"] = make_device(name="one", seconds_ago=1)
+
+    assert first.devices == {"AA:AA": first.devices["AA:AA"]}
+    assert second.devices == {}
+
+
 class FakeScanner:
     def __init__(self, detection_callback=None) -> None:
         self.detection_callback = detection_callback
