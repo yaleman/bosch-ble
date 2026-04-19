@@ -182,6 +182,40 @@ def test_stage_bosch_security_pairs_after_insufficient_encryption() -> None:
     ]
 
 
+def test_assist_connection_accepts_connected_state_after_local_abort() -> None:
+    info_result = CompletedProcess(["bluetoothctl", "info", "AA:BB"], 0, stdout="", stderr="")
+    pair_result = CompletedProcess(["bluetoothctl", "pair", "AA:BB"], 0, stdout="", stderr="")
+    trust_result = CompletedProcess(["bluetoothctl", "trust", "AA:BB"], 0, stdout="", stderr="")
+    connect_result = CompletedProcess(
+        ["bluetoothctl", "connect", "AA:BB"],
+        1,
+        stdout="Connected: yes\n",
+        stderr="Failed to connect: org.bluez.Error.Failed le-connection-abort-by-local\n",
+    )
+    connected_state = bluez.BluezState(
+        address="AA:BB",
+        visible=True,
+        device=None,
+        name="sensor",
+        paired=False,
+        trusted=True,
+        connected=True,
+        services_resolved=None,
+        bluetoothctl=CompletedProcess(["bluetoothctl"], 0, stdout="Connected: yes\n", stderr=""),
+        busctl=None,
+    )
+
+    with patch.object(
+        bluez,
+        "run_command",
+        side_effect=[info_result, pair_result, trust_result, connect_result],
+    ):
+        with patch.object(bluez, "read_device_state", return_value=connected_state):
+            result = bluez.assist_connection("AA:BB")
+
+    assert result is connected_state
+
+
 def test_dump_gatt_main_runs_preflight_and_assisted_connect_before_bleak_client(
     capsys: pytest.CaptureFixture[str],
 ) -> None:

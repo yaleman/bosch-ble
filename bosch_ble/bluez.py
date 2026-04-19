@@ -216,7 +216,7 @@ def assist_connection(address: str, verbose: bool = False) -> BluezState:
         if state.busctl is not None:
             print_section("busctl introspect", state.busctl)
 
-    if connect_result is not None and connect_result.returncode != 0:
+    if connect_result is not None and connect_result.returncode != 0 and state.connected is not True:
         raise RuntimeError(f"BlueZ connect failed for {address}: {summarize_failure(connect_result)}")
     if state.connected is False:
         raise RuntimeError(f"BlueZ reports {address} is not connected after connect attempt.")
