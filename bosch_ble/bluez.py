@@ -228,26 +228,77 @@ async def wait_for_services(
     timeout: float = DEFAULT_WAIT_TIMEOUT,
     interval: float = DEFAULT_WAIT_INTERVAL,
 ) -> BluezState:
-    if not busctl_available():
-        return read_device_state(address)
+    initial_state = read_device_state(address)
+    if not busctl_available() and initial_state.services_resolved is None:
+        return initial_state
+
+    try:
+        return await wait_for_state(
+            address,
+            connected=True,
+            services_resolved=True,
+            timeout=timeout,
+            interval=interval,
+        )
+    except RuntimeError:
+        last_state = read_device_state(address)
+        if last_state.connected is True:
+            raise RuntimeError(f"BlueZ connected to {address} but services did not resolve.")
+        if last_state.connected is False:
+            raise RuntimeError(f"BlueZ could not keep {address} connected long enough to resolve services.")
+        raise RuntimeError(f"BlueZ did not report service resolution for {address}.")
+
+
+async def wait_for_state(
+    address: str,
+    *,
+    paired: bool | None = None,
+    connected: bool | None = None,
+    services_resolved: bool | None = None,
+    timeout: float = DEFAULT_WAIT_TIMEOUT,
+    interval: float = DEFAULT_WAIT_INTERVAL,
+) -> BluezState:
+    last_state = read_device_state(address)
+    target_services_resolved = services_resolved
+    if (
+        target_services_resolved is not None
+        and not busctl_available()
+        and last_state.services_resolved is None
+    ):
+        target_services_resolved = None
 
     loop = asyncio.get_running_loop()
     deadline = loop.time() + timeout
-    last_state = read_device_state(address)
+
+    def matches(state: BluezState) -> bool:
+        if paired is not None and state.paired is not paired:
+            return False
+        if connected is not None and state.connected is not connected:
+            return False
+        if (
+            target_services_resolved is not None
+            and state.services_resolved is not target_services_resolved
+        ):
+            return False
+        return True
 
     while True:
-        if last_state.services_resolved is True:
+        if matches(last_state):
             return last_state
         if loop.time() >= deadline:
             break
         await asyncio.sleep(interval)
         last_state = read_device_state(address)
 
-    if last_state.connected is True:
-        raise RuntimeError(f"BlueZ connected to {address} but services did not resolve.")
-    if last_state.connected is False:
-        raise RuntimeError(f"BlueZ could not keep {address} connected long enough to resolve services.")
-    raise RuntimeError(f"BlueZ did not report service resolution for {address}.")
+    expected_flags: list[str] = []
+    if paired is not None:
+        expected_flags.append(f"paired={paired}")
+    if connected is not None:
+        expected_flags.append(f"connected={connected}")
+    if target_services_resolved is not None:
+        expected_flags.append(f"services_resolved={target_services_resolved}")
+    expected = ", ".join(expected_flags) if expected_flags else "requested state"
+    raise RuntimeError(f"BlueZ did not reach {expected} for {address}.")
 
 
 def info_cli() -> None:

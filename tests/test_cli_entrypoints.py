@@ -11,6 +11,27 @@ import pytest
 from bosch_ble import bluez, dump_gatt, log_chars
 
 
+class FakeDescriptor:
+    def __init__(self, handle: int, uuid: str) -> None:
+        self.handle = handle
+        self.uuid = uuid
+
+
+class FakeCharacteristicWithDescriptors:
+    def __init__(self, uuid: str, properties: list[str], descriptors: list[FakeDescriptor]) -> None:
+        self.uuid = uuid
+        self.properties = properties
+        self.descriptors = descriptors
+        self.description = uuid
+
+
+class FakeServiceWithCharacteristics:
+    def __init__(self, uuid: str, characteristics: list[FakeCharacteristicWithDescriptors]) -> None:
+        self.uuid = uuid
+        self.characteristics = characteristics
+        self.description = uuid
+
+
 def test_dump_gatt_cli_shows_usage_without_address(capsys: pytest.CaptureFixture[str]) -> None:
     with patch("sys.argv", ["bosch-ble-dump-gatt"]):
         with pytest.raises(SystemExit) as excinfo:
@@ -60,6 +81,105 @@ def test_dump_gatt_cli_falls_back_to_exception_type_when_message_is_empty(
     assert excinfo.value.code == 1
     captured = capsys.readouterr()
     assert captured.err == "Error: RuntimeError\n"
+
+
+def test_find_bosch_security_descriptor_returns_cccd_on_expected_handle() -> None:
+    descriptor = FakeDescriptor(0x001F, "00002902-0000-1000-8000-00805f9b34fb")
+    notify_char = FakeCharacteristicWithDescriptors(
+        "00000011-eaa2-11e9-81b4-2a2ae2dbcce4",
+        ["notify"],
+        [descriptor],
+    )
+    write_char = FakeCharacteristicWithDescriptors(
+        "00000012-eaa2-11e9-81b4-2a2ae2dbcce4",
+        ["write-without-response"],
+        [],
+    )
+    service = FakeServiceWithCharacteristics(
+        "00000010-eaa2-11e9-81b4-2a2ae2dbcce4",
+        [notify_char, write_char],
+    )
+
+    result = dump_gatt.find_bosch_security_descriptor([service])
+
+    assert result is descriptor
+
+
+def test_find_bosch_security_descriptor_fails_cleanly_when_service_is_missing() -> None:
+    service = FakeServiceWithCharacteristics(
+        "1800",
+        [FakeCharacteristicWithDescriptors("2a00", ["read"], [])],
+    )
+
+    with pytest.raises(RuntimeError) as excinfo:
+        dump_gatt.find_bosch_security_descriptor([service])
+
+    assert str(excinfo.value) == "Bosch security descriptor was not found."
+
+
+def test_stage_bosch_security_pairs_after_insufficient_encryption() -> None:
+    events: list[tuple[str, object]] = []
+    descriptor = FakeDescriptor(0x001F, "00002902-0000-1000-8000-00805f9b34fb")
+    service = FakeServiceWithCharacteristics(
+        "00000010-eaa2-11e9-81b4-2a2ae2dbcce4",
+        [
+            FakeCharacteristicWithDescriptors(
+                "00000011-eaa2-11e9-81b4-2a2ae2dbcce4",
+                ["notify"],
+                [descriptor],
+            )
+        ],
+    )
+
+    class FakeClient:
+        def __init__(self) -> None:
+            self.services = [service]
+            self.is_connected = True
+            self.write_attempts = 0
+
+        async def write_gatt_descriptor(self, handle: int, data: bytes) -> None:
+            self.write_attempts += 1
+            events.append(("write_gatt_descriptor", handle, data))
+            if self.write_attempts == 1:
+                raise RuntimeError("ATT error: Insufficient Encryption")
+
+        async def pair(self) -> None:
+            events.append(("pair", "called"))
+
+    async def run() -> None:
+        client = FakeClient()
+        paired_state = bluez.BluezState(
+            address="AA:BB",
+            visible=True,
+            device=None,
+            name="sensor",
+            paired=True,
+            trusted=True,
+            connected=True,
+            services_resolved=True,
+            bluetoothctl=CompletedProcess(["bluetoothctl"], 0, stdout="", stderr=""),
+            busctl=CompletedProcess(["busctl"], 0, stdout="", stderr=""),
+        )
+        with patch.object(
+            dump_gatt.bluez,
+            "wait_for_state",
+            new=AsyncMock(return_value=paired_state),
+        ) as wait_for_state:
+            await dump_gatt.stage_bosch_security(client, "AA:BB")
+
+        wait_for_state.assert_awaited_once_with(
+            "AA:BB",
+            paired=True,
+            connected=True,
+            services_resolved=True,
+        )
+
+    asyncio.run(run())
+    assert events == [
+        ("write_gatt_descriptor", 0x001F, b"\x00\x00"),
+        ("pair", "called"),
+        ("write_gatt_descriptor", 0x001F, b"\x00\x00"),
+    ]
 
 
 def test_dump_gatt_main_runs_preflight_and_assisted_connect_before_bleak_client(

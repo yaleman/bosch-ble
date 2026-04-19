@@ -11,6 +11,10 @@ from bosch_ble import bluez
 
 DISCOVERY_RETRY_ATTEMPTS = 3
 REDISCOVERY_TIMEOUT = 10.0
+BOSCH_SERVICE_UUID = "00000010-eaa2-11e9-81b4-2a2ae2dbcce4"
+BOSCH_NOTIFY_CHAR_UUID = "00000011-eaa2-11e9-81b4-2a2ae2dbcce4"
+CCCD_UUID = "00002902-0000-1000-8000-00805f9b34fb"
+BOSCH_SECURITY_DESCRIPTOR_HANDLE = 0x001F
 
 
 def props_to_str(props: list[str | "CharacteristicPropertyName"]) -> str:
@@ -27,7 +31,51 @@ def retry_message(error: Exception, address: str) -> str | None:
         return f"Retrying service discovery for {address} ..."
     if "operation already in progress" in message:
         return f"Retrying connection setup for {address} ..."
+    if "security transition disconnected" in message:
+        return f"Retrying security setup for {address} ..."
     return None
+
+
+def normalize_uuid(value: object) -> str:
+    return str(value).lower()
+
+
+def find_bosch_security_descriptor(services: object) -> object:
+    for service in services:
+        if normalize_uuid(getattr(service, "uuid", "")) != BOSCH_SERVICE_UUID:
+            continue
+        for characteristic in getattr(service, "characteristics", []):
+            if normalize_uuid(getattr(characteristic, "uuid", "")) != BOSCH_NOTIFY_CHAR_UUID:
+                continue
+            for descriptor in getattr(characteristic, "descriptors", []):
+                if (
+                    getattr(descriptor, "handle", None) == BOSCH_SECURITY_DESCRIPTOR_HANDLE
+                    and normalize_uuid(getattr(descriptor, "uuid", "")) == CCCD_UUID
+                ):
+                    return descriptor
+    raise RuntimeError("Bosch security descriptor was not found.")
+
+
+async def stage_bosch_security(client: BleakClient, address: str) -> None:
+    descriptor = find_bosch_security_descriptor(client.services)
+    try:
+        await client.write_gatt_descriptor(descriptor.handle, b"\x00\x00")
+        return
+    except Exception as exc:
+        message = str(exc).lower()
+        if "insufficient encryption" not in message and "authentication" not in message:
+            raise
+
+    await client.pair()
+    state = await bluez.wait_for_state(
+        address,
+        paired=True,
+        connected=True,
+        services_resolved=True,
+    )
+    if state.connected is not True or not client.is_connected:
+        raise RuntimeError(f"Security transition disconnected for {address}.")
+    await client.write_gatt_descriptor(descriptor.handle, b"\x00\x00")
 
 
 async def resolve_device(address: str) -> bluez.BluezState:
@@ -73,6 +121,11 @@ async def main(address: str) -> None:
                 print(f"Connected: {client.is_connected}")
                 if not client.is_connected:
                     raise RuntimeError("Failed to connect")
+                try:
+                    await stage_bosch_security(client, address)
+                except RuntimeError as exc:
+                    if str(exc) != "Bosch security descriptor was not found.":
+                        raise
 
                 print()
                 print("Services and characteristics")
