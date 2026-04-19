@@ -3,32 +3,4 @@ set -euo pipefail
 
 host="${1:-${REMOTE_HOST:?REMOTE_HOST must be set}}"
 
-ssh "$host" 'bash -se' <<'EOF'
-set -euo pipefail
-
-state_dir="$HOME/.cache/bosch-sniffer"
-
-if [ ! -f "$state_dir/current_sniffer_pid" ]; then
-  echo "no active sniffer capture" >&2
-  exit 1
-fi
-
-sniffer_pid="$(cat "$state_dir/current_sniffer_pid")"
-capture_path="$(cat "$state_dir/current_capture")"
-
-kill -INT "$sniffer_pid" 2>/dev/null || true
-sleep 2
-
-if kill -0 "$sniffer_pid" 2>/dev/null; then
-  kill "$sniffer_pid" 2>/dev/null || true
-fi
-wait "$sniffer_pid" 2>/dev/null || true
-
-echo "saved $capture_path"
-echo "log $state_dir/current.log"
-
-rm -f \
-  "$state_dir/current_sniffer_pid" \
-  "$state_dir/current_capture" \
-  "$state_dir/capture_sniffer.py"
-EOF
+ssh "${host}" 'killall tshark'
