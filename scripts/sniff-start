@@ -1,0 +1,89 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+host="${1:-m710qa.local}"
+
+ssh "$host" 'bash -se' <<'EOF'
+set -euo pipefail
+
+state_dir="$HOME/.cache/bosch-sniffer"
+captures_dir="$HOME/captures"
+remote_extcap_dir="$HOME/.local/lib/wireshark/extcap"
+remote_script_path="$state_dir/capture_sniffer.py"
+sniffer_port="/dev/ttyACM0"
+
+mkdir -p "$state_dir" "$captures_dir"
+
+if [ -f "$state_dir/current_sniffer_pid" ]; then
+  existing_pid="$(cat "$state_dir/current_sniffer_pid")"
+  if kill -0 "$existing_pid" 2>/dev/null; then
+    echo "sniffer already running with pid=$existing_pid" >&2
+    exit 1
+  fi
+  rm -f \
+    "$state_dir/current_sniffer_pid" \
+    "$state_dir/current_sink_pid" \
+    "$state_dir/current_capture" \
+    "$state_dir/current_fifo"
+fi
+
+capture_path="$captures_dir/bosch-pairing-$(date +%F-%H%M%S).pcap"
+
+cat > "$remote_script_path" <<'PY'
+import signal
+import sys
+import time
+
+from extcap.SnifferAPI import Sniffer
+
+
+capture_path = sys.argv[1]
+sniffer_port = sys.argv[2]
+stop_requested = False
+
+
+def handle_stop(signum, frame):
+    del signum, frame
+    global stop_requested
+    stop_requested = True
+
+
+signal.signal(signal.SIGINT, handle_stop)
+signal.signal(signal.SIGTERM, handle_stop)
+
+sniffer = Sniffer.Sniffer(sniffer_port, capture_file_path=capture_path)
+sniffer.setAdvHopSequence([37, 38, 39])
+sniffer.setSupportedProtocolVersion(2)
+sniffer.start()
+sniffer.getFirmwareVersion()
+sniffer.getTimestamp()
+sniffer.scan(True, True, False)
+
+print(f"capturing to {capture_path}", flush=True)
+
+try:
+    while not stop_requested:
+        time.sleep(1)
+finally:
+    sniffer.doExit(join=True)
+PY
+
+nohup bash -lc \
+  "cd '$remote_extcap_dir' && uv run python '$remote_script_path' '$capture_path' '$sniffer_port'" \
+  > "$state_dir/current.log" 2>&1 &
+sniffer_pid="$!"
+
+sleep 1
+if ! kill -0 "$sniffer_pid" 2>/dev/null; then
+  cat "$state_dir/current.log" >&2 || true
+  echo "sniffer failed to start" >&2
+  exit 1
+fi
+
+printf '%s\n' "$sniffer_pid" > "$state_dir/current_sniffer_pid"
+printf '%s\n' "$capture_path" > "$state_dir/current_capture"
+
+echo "capture=$capture_path"
+echo "sniffer_pid=$sniffer_pid"
+echo "log=$state_dir/current.log"
+EOF
