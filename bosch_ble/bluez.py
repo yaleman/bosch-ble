@@ -105,7 +105,10 @@ def find_device_object_path(address: str) -> str | None:
 
     suffix = device_object_suffix(address)
     for line in tree.stdout.splitlines():
-        object_path = line.strip()
+        marker = line.find("/org/bluez")
+        if marker < 0:
+            continue
+        object_path = line[marker:].strip()
         if object_path.endswith(f"/{suffix}"):
             return object_path
 

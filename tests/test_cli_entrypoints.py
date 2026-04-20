@@ -864,6 +864,7 @@ def test_bluez_preflight_cli_reports_visible_device_and_state(
                 stderr="",
             )
         if argv[:2] == ["busctl", "introspect"]:
+            assert argv[3] == "/org/bluez/hci1/dev_AA_BB"
             return CompletedProcess(
                 argv,
                 0,
@@ -952,7 +953,7 @@ def test_bluez_preflight_cli_falls_back_when_busctl_tree_with_path_fails(
             return CompletedProcess(
                 argv,
                 0,
-                stdout="/org/bluez/hci0/dev_AA_BB\n",
+                stdout="└─ /org/bluez/hci0\n   ├─ /org/bluez/hci0/dev_AA_BB\n",
                 stderr="",
             )
         if argv[:2] == ["busctl", "introspect"]:
