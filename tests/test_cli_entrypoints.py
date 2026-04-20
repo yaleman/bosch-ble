@@ -890,6 +890,96 @@ def test_bluez_preflight_cli_reports_visible_device_and_state(
     assert "ServicesResolved: yes" in output
 
 
+def test_bluez_preflight_cli_reads_services_resolved_from_tree_output_with_prefixes(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    def fake_run(argv: list[str], timeout: float = 0.0) -> CompletedProcess[str]:
+        if argv[:2] == ["bluetoothctl", "info"]:
+            return CompletedProcess(
+                argv,
+                0,
+                stdout="Paired: yes\nTrusted: yes\nConnected: yes\n",
+                stderr="",
+            )
+        if argv[:2] == ["busctl", "tree"]:
+            return CompletedProcess(
+                argv,
+                0,
+                stdout="└─ /org/bluez/hci0\n   └─ /org/bluez/hci0/dev_AA_BB\n",
+                stderr="",
+            )
+        if argv[:2] == ["busctl", "introspect"]:
+            return CompletedProcess(
+                argv,
+                0,
+                stdout=".ServicesResolved  property  b  true\n",
+                stderr="",
+            )
+        raise AssertionError(argv)
+
+    with patch.object(bluez, "run_command", side_effect=fake_run):
+        with patch.object(
+            bluez.BleakScanner,
+            "find_device_by_address",
+            new=AsyncMock(return_value=None),
+        ):
+            with patch("bosch_ble.bluez.shutil.which", return_value="/usr/bin/busctl"):
+                with patch("sys.argv", ["bosch-ble-bluez-preflight", "AA:BB"]):
+                    bluez.preflight_cli()
+
+    output = capsys.readouterr().out
+    assert "ServicesResolved: yes" in output
+    assert "== busctl introspect ==" in output
+
+
+def test_bluez_preflight_cli_falls_back_when_busctl_tree_with_path_fails(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    calls: list[list[str]] = []
+
+    def fake_run(argv: list[str], timeout: float = 0.0) -> CompletedProcess[str]:
+        calls.append(argv)
+        if argv[:2] == ["bluetoothctl", "info"]:
+            return CompletedProcess(
+                argv,
+                0,
+                stdout="Paired: yes\nTrusted: yes\nConnected: yes\n",
+                stderr="",
+            )
+        if argv == ["busctl", "tree", "org.bluez", "/org/bluez"]:
+            return CompletedProcess(argv, 1, stdout="", stderr="bad object path\n")
+        if argv == ["busctl", "tree", "org.bluez"]:
+            return CompletedProcess(
+                argv,
+                0,
+                stdout="/org/bluez/hci0/dev_AA_BB\n",
+                stderr="",
+            )
+        if argv[:2] == ["busctl", "introspect"]:
+            return CompletedProcess(
+                argv,
+                0,
+                stdout=".ServicesResolved  property  b  true\n",
+                stderr="",
+            )
+        raise AssertionError(argv)
+
+    with patch.object(bluez, "run_command", side_effect=fake_run):
+        with patch.object(
+            bluez.BleakScanner,
+            "find_device_by_address",
+            new=AsyncMock(return_value=None),
+        ):
+            with patch("bosch_ble.bluez.shutil.which", return_value="/usr/bin/busctl"):
+                with patch("sys.argv", ["bosch-ble-bluez-preflight", "AA:BB"]):
+                    bluez.preflight_cli()
+
+    output = capsys.readouterr().out
+    assert "ServicesResolved: yes" in output
+    assert ["busctl", "tree", "org.bluez", "/org/bluez"] in calls
+    assert ["busctl", "tree", "org.bluez"] in calls
+
+
 def test_bluez_preflight_cli_reports_absent_device(
     capsys: pytest.CaptureFixture[str],
 ) -> None:

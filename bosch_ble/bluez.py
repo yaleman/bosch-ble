@@ -97,9 +97,11 @@ def find_device_object_path(address: str) -> str | None:
     if not busctl_available():
         return None
 
-    tree = run_command(["busctl", "tree", "org.bluez", "/org/bluez"])
+    tree = run_command(["busctl", "tree", "org.bluez", BLUEZ_ROOT_PATH])
     if tree.returncode != 0:
-        return None
+        tree = run_command(["busctl", "tree", "org.bluez"])
+        if tree.returncode != 0:
+            return None
 
     suffix = device_object_suffix(address)
     for line in tree.stdout.splitlines():
