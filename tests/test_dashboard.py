@@ -10,28 +10,30 @@ from bosch_ble import dashboard, messagebus
 def test_dashboard_state_updates_from_known_payloads() -> None:
     state = dashboard.DashboardState()
 
-    state.apply_frame(messagebus.decode_directed_frame("2030c0a9210809"))
-    state.apply_frame(messagebus.decode_directed_frame("2010c089a0084d"))
-    state.apply_frame(messagebus.decode_directed_frame("2010c0a3a00801"))
-    state.apply_frame(messagebus.decode_directed_frame("2010c0a8a008e613"))
+    state.apply_message(messagebus.decode_directed_frame("2030c0a9210809"))
+    state.apply_message(messagebus.decode_message_frame("80bc084d"))
+    state.apply_message(messagebus.decode_message_frame("808a0801"))
+    state.apply_message(messagebus.decode_message_frame("982d08191001"))
+    state.apply_message(messagebus.decode_message_frame("981e08d402"))
 
     assert state.startup_stage == "STAGE9"
     assert state.battery_percent == 77
     assert state.charger_connected is True
-    assert state.speed_kmh == pytest.approx(25.34)
+    assert state.speed_raw == 25
+    assert state.assist_mode == "340"
     assert state.connection_status == "connected"
 
 
 def test_dashboard_state_keeps_recent_frame_summaries_trimmed() -> None:
     state = dashboard.DashboardState(recent_limit=2)
 
-    state.apply_frame(messagebus.decode_directed_frame("2030c0a9210809"))
-    state.apply_frame(messagebus.decode_directed_frame("2150c09f01"))
-    state.apply_frame(messagebus.decode_directed_frame("2002c08161"))
+    state.apply_message(messagebus.decode_directed_frame("2030c0a9210809"))
+    state.apply_message(messagebus.decode_directed_frame("2150c09f01"))
+    state.apply_message(messagebus.decode_message_frame("80bc084d"))
 
     assert list(state.recent_frames) == [
         "READ MOBILE_APP_FEATURE_PROPERTIES_RELEASE4",
-        "SUBSCRIBE UI_PRIORITY",
+        "NOTIFY BATTERY_SYSTEM_STATE_OF_CHARGE_FOR_RIDER payload=084d",
     ]
 
 
@@ -39,9 +41,9 @@ def test_render_dashboard_shows_compact_interpreted_state() -> None:
     state = dashboard.DashboardState(
         connection_status="connected",
         startup_stage="STAGE9",
-        assist_mode="Turbo",
+        assist_mode="340",
         battery_percent=77,
-        speed_kmh=25.34,
+        speed_raw=25,
         charger_connected=False,
         recent_limit=3,
     )
@@ -56,9 +58,9 @@ def test_render_dashboard_shows_compact_interpreted_state() -> None:
 
     assert "Connection : connected" in rendered
     assert "Startup    : STAGE9" in rendered
-    assert "Assist     : Turbo" in rendered
+    assert "Assist     : 340" in rendered
     assert "Battery    : 77%" in rendered
-    assert "Speed      : 25.34 km/h" in rendered
+    assert "Speed      : 25 raw" in rendered
     assert "Charger    : unplugged" in rendered
     assert "Recent frames:" in rendered
     assert "WRITE STARTUP_STAGE payload=0809" in rendered

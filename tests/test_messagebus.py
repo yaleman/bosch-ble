@@ -40,6 +40,55 @@ def test_decode_directed_frame_parses_mobile_app_subscribe() -> None:
     assert frame.target_name == "USER_INFO"
 
 
+def test_decode_message_frame_parses_notify() -> None:
+    frame = messagebus.decode_message_frame("80bc084d")
+
+    assert isinstance(frame, messagebus.NotifyFrame)
+    assert frame.source == 0x00BC
+    assert frame.payload == bytes.fromhex("084d")
+    assert frame.source_name == "BATTERY_SYSTEM_STATE_OF_CHARGE_FOR_RIDER"
+
+
+def test_decode_directed_frame_parses_success_response_without_status_byte() -> None:
+    frame = messagebus.decode_directed_frame("409fa150110801")
+
+    assert frame.source == 0x409F
+    assert frame.destination == 0x2150
+    assert frame.message_type is messagebus.MessageType.READ_RESPONSE
+    assert frame.sequence == 1
+    assert frame.status_code is messagebus.ResponseStatusCode.SUCCESS
+    assert frame.payload == bytes.fromhex("0801")
+
+
+def test_decode_directed_frame_parses_error_response_with_status_byte() -> None:
+    frame = messagebus.decode_directed_frame("40ff20027104")
+
+    assert frame.source == 0x40FF
+    assert frame.destination == 0x2002
+    assert frame.message_type is messagebus.MessageType.SUBSCRIBE_RESPONSE
+    assert frame.sequence == 1
+    assert frame.status_code is messagebus.ResponseStatusCode.UNSUPPORTED
+    assert frame.payload == b""
+
+
+def test_encode_read_response_matches_android_wire_shape() -> None:
+    request = messagebus.decode_directed_frame("2150c09f01")
+
+    encoded = messagebus.encode_read_response(request, bytes.fromhex("0801"))
+
+    assert encoded.hex() == "409fa150110801"
+
+
+def test_encode_subscribe_response_and_notify_match_android_wire_shape() -> None:
+    request = messagebus.decode_directed_frame("2002c0a360")
+
+    response = messagebus.encode_subscribe_response(request)
+    notify = messagebus.encode_notify(0x40A3, b"")
+
+    assert response.hex() == "40a3a00270"
+    assert notify.hex() == "c0a3"
+
+
 def test_validate_handshake_log_accepts_known_startup_burst() -> None:
     log_text = """\
 2026-04-20T15:09:14 RECV command=VersionCommand(version=3)

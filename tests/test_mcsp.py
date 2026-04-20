@@ -249,3 +249,44 @@ def test_handshake_main_logs_non_command_frames_after_handshake(
     output = capsys.readouterr().out
     assert "FRAME channel=CHANNEL1 end=True hex=2002c08161" in output
     assert "DECODE_FAILED" not in output
+
+
+def test_build_startup_response_packets_answers_reads_and_subscribes() -> None:
+    read_packets = handshake.build_startup_response_packets(
+        messagebus=mcsp.encode_frame(
+            mcsp.Frame(
+                end_of_channel=True,
+                channel=mcsp.McspChannel.CHANNEL1,
+                payload=bytes.fromhex("2150c09f01"),
+            )
+        )
+    )
+    subscribe_packets = handshake.build_startup_response_packets(
+        messagebus=mcsp.encode_frame(
+            mcsp.Frame(
+                end_of_channel=True,
+                channel=mcsp.McspChannel.CHANNEL1,
+                payload=bytes.fromhex("2002c0a360"),
+            )
+        )
+    )
+
+    assert [packet.hex() for packet in read_packets] == ["3007409fa150110801"]
+    assert [packet.hex() for packet in subscribe_packets] == [
+        "300540a3a00270",
+        "3002c0a3",
+    ]
+
+
+def test_build_startup_response_packets_returns_unsupported_for_unmapped_request() -> None:
+    packets = handshake.build_startup_response_packets(
+        messagebus=mcsp.encode_frame(
+            mcsp.Frame(
+                end_of_channel=True,
+                channel=mcsp.McspChannel.CHANNEL1,
+                payload=bytes.fromhex("2002c0ff61"),
+            )
+        )
+    )
+
+    assert [packet.hex() for packet in packets] == ["300640ff20027104"]

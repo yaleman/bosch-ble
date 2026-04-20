@@ -58,22 +58,33 @@ def decode_uint8_nullable(payload: bytes) -> int | None:
     return _parse_varint_fields(payload).get(1)
 
 
-def decode_boolean_nullable(payload: bytes) -> bool | None:
+def decode_boolean(payload: bytes) -> bool | None:
     value = _parse_varint_fields(payload).get(1)
     if value is None:
         return None
     return bool(value)
 
 
-def decode_gnss_speed(payload: bytes) -> float | None:
+def decode_uint(payload: bytes) -> int | None:
     value = _parse_varint_fields(payload).get(1)
-    if value is None:
-        return None
-    return value / 100.0
+    return value
+
+
+def decode_bike_speed(payload: bytes) -> tuple[int | None, bool | None]:
+    fields = _parse_varint_fields(payload)
+    value = fields.get(1)
+    validity = fields.get(2)
+    if validity is None:
+        return value, None
+    return value, bool(validity)
 
 
 def _format_target(frame: messagebus.DirectedFrame) -> str:
     return frame.target_name or f"0x{frame.destination:04x}"
+
+
+def _format_source(frame: messagebus.NotifyFrame) -> str:
+    return frame.source_name or f"0x{frame.source:04x}"
 
 
 @dataclass
@@ -82,40 +93,87 @@ class DashboardState:
     startup_stage: str | None = None
     assist_mode: str | None = None
     battery_percent: int | None = None
-    speed_kmh: float | None = None
+    speed_raw: int | None = None
     charger_connected: bool | None = None
     recent_limit: int = 8
     updated_at: str | None = None
     recent_frames: deque[str] = field(init=False)
+    _battery_system_percent: int | None = field(init=False, default=None)
+    _battery_pack_percent: int | None = field(init=False, default=None)
+    _charging_active: bool | None = field(init=False, default=None)
+    _instance_charging_active: bool | None = field(init=False, default=None)
 
     def __post_init__(self) -> None:
         self.recent_frames = deque(maxlen=self.recent_limit)
 
-    def apply_frame(self, frame: messagebus.DirectedFrame) -> None:
+    def apply_message(self, frame: messagebus.MessageFrame) -> None:
         self.connection_status = "connected"
         self.updated_at = ts()
         self.recent_frames.append(self._summarize_frame(frame))
-        target = frame.target_name
-        if target == "STARTUP_STAGE":
-            stage = decode_uint8_nullable(frame.payload)
-            if stage is not None:
-                self.startup_stage = f"STAGE{stage}"
+        if isinstance(frame, messagebus.DirectedFrame):
+            self._apply_directed_frame(frame)
             return
-        if target == "STATE_OF_CHARGE":
-            self.battery_percent = decode_uint8_nullable(frame.payload)
-            return
-        if target == "PHONE_CHARGING":
-            self.charger_connected = decode_boolean_nullable(frame.payload)
-            return
-        if target in {"SPEED", "DRIVE_UNIT_DISPLAYED_BIKE_SPEED"}:
-            self.speed_kmh = decode_gnss_speed(frame.payload)
-            return
-        if target == "DRIVE_UNIT_PRESENT_ASSIST_FACTOR":
-            assist_factor = decode_uint8_nullable(frame.payload)
-            if assist_factor is not None:
-                self.assist_mode = f"{assist_factor}% assist"
+        self._apply_notify_frame(frame)
 
-    def _summarize_frame(self, frame: messagebus.DirectedFrame) -> str:
+    def apply_frame(self, frame: messagebus.DirectedFrame) -> None:
+        self.apply_message(frame)
+
+    def _apply_directed_frame(self, frame: messagebus.DirectedFrame) -> None:
+        if frame.target_name != "STARTUP_STAGE":
+            return
+        stage = decode_uint8_nullable(frame.payload)
+        if stage is not None:
+            self.startup_stage = f"STAGE{stage}"
+
+    def _apply_notify_frame(self, frame: messagebus.NotifyFrame) -> None:
+        source = frame.source_name
+        if source == "BATTERY_SYSTEM_STATE_OF_CHARGE_FOR_RIDER":
+            self._battery_system_percent = decode_uint(frame.payload)
+            self._recompute_battery_percent()
+            return
+        if source == "BATTERY_STATE_OF_CHARGE":
+            self._battery_pack_percent = decode_uint(frame.payload)
+            self._recompute_battery_percent()
+            return
+        if source == "BATTERY_CHARGING_ACTIVE":
+            self._charging_active = decode_boolean(frame.payload)
+            self._recompute_charger_connected()
+            return
+        if source == "BATTERY_INSTANCE_CHARGING_ACTIVE":
+            self._instance_charging_active = decode_boolean(frame.payload)
+            self._recompute_charger_connected()
+            return
+        if source == "DRIVE_UNIT_PRESENT_ASSIST_FACTOR":
+            assist_factor = decode_uint(frame.payload)
+            if assist_factor is not None:
+                self.assist_mode = str(assist_factor)
+            return
+        if source == "DRIVE_UNIT_DISPLAYED_BIKE_SPEED":
+            speed, valid = decode_bike_speed(frame.payload)
+            if valid is True and speed is not None:
+                self.speed_raw = speed
+            elif valid is False:
+                self.speed_raw = None
+
+    def _recompute_battery_percent(self) -> None:
+        self.battery_percent = self._battery_system_percent
+        if self.battery_percent is None:
+            self.battery_percent = self._battery_pack_percent
+
+    def _recompute_charger_connected(self) -> None:
+        values = [self._charging_active, self._instance_charging_active]
+        if any(value is True for value in values):
+            self.charger_connected = True
+            return
+        if any(value is not None for value in values):
+            self.charger_connected = False
+
+    def _summarize_frame(self, frame: messagebus.MessageFrame) -> str:
+        if isinstance(frame, messagebus.NotifyFrame):
+            summary = f"NOTIFY {_format_source(frame)}"
+            if frame.payload:
+                summary += f" payload={frame.payload.hex()}"
+            return summary
         summary = f"{frame.message_type.name} {_format_target(frame)}"
         if frame.payload:
             summary += f" payload={frame.payload.hex()}"
@@ -128,10 +186,10 @@ def _format_percent(value: int | None) -> str:
     return f"{value}%"
 
 
-def _format_speed(value: float | None) -> str:
+def _format_speed(value: int | None) -> str:
     if value is None:
         return "unknown"
-    return f"{value:.2f} km/h"
+    return f"{value} raw"
 
 
 def _format_charger(value: bool | None) -> str:
@@ -148,7 +206,7 @@ def render_dashboard(state: DashboardState) -> str:
         f"Startup    : {state.startup_stage or 'unknown'}",
         f"Assist     : {state.assist_mode or 'unknown'}",
         f"Battery    : {_format_percent(state.battery_percent)}",
-        f"Speed      : {_format_speed(state.speed_kmh)}",
+        f"Speed      : {_format_speed(state.speed_raw)}",
         f"Charger    : {_format_charger(state.charger_connected)}",
     ]
     if state.updated_at:
@@ -189,6 +247,19 @@ async def main(address: str) -> None:
 
         receive_uuid, send_uuid = handshake.find_mcsp_transport(client.services)
         handshake_future: asyncio.Future[list[mcsp.Command]] = loop.create_future()
+        background_tasks: set[asyncio.Task[None]] = set()
+        handshake_complete = False
+
+        async def send_packets(packets: list[bytes]) -> None:
+            for packet in packets:
+                await client.write_gatt_char(send_uuid, packet, response=False)
+
+        def schedule_packets(packets: list[bytes]) -> None:
+            if not packets:
+                return
+            task = loop.create_task(send_packets(packets))
+            background_tasks.add(task)
+            task.add_done_callback(background_tasks.discard)
 
         def notify_handler(sender: Any, data: bytearray) -> None:
             del sender
@@ -212,13 +283,15 @@ async def main(address: str) -> None:
                     continue
 
                 try:
-                    directed = messagebus.decode_directed_frame(frame.payload)
+                    message = messagebus.decode_message_frame(frame.payload)
                 except Exception:
                     state.recent_frames.append(
                         f"{frame.channel.name} payload={frame.payload.hex()}"
                     )
                     continue
-                state.apply_frame(directed)
+                if handshake_complete:
+                    schedule_packets(handshake.build_startup_response_packets(mcsp.encode_frame(frame)))
+                state.apply_message(message)
 
             if not handshake_future.done() and handshake.is_bike_handshake(commands):
                 handshake_future.set_result(commands)
@@ -230,6 +303,7 @@ async def main(address: str) -> None:
                 handshake_future,
                 timeout=HANDSHAKE_TIMEOUT_SECONDS,
             )
+            handshake_complete = True
             for packet in handshake.build_handshake_response(commands):
                 await client.write_gatt_char(send_uuid, packet, response=False)
             while not stop.is_set():
@@ -239,6 +313,8 @@ async def main(address: str) -> None:
                 except TimeoutError:
                     continue
         finally:
+            if background_tasks:
+                await asyncio.gather(*background_tasks, return_exceptions=True)
             await client.stop_notify(receive_uuid)
             state.connection_status = "disconnected"
             _print_dashboard(state)
