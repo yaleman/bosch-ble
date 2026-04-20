@@ -28,8 +28,8 @@ async def main(address: str, out_file: str = "ble_log.txt") -> None:
     global STOP
     STOP = asyncio.Event()
     path = Path(out_file)
-    print(f"Connecting to {address} ...")
-    print(f"Logging to {path.resolve()}")
+    print(f"Connecting to {address} ...", flush=True)
+    print(f"Logging to {path}", flush=True)
 
     loop = asyncio.get_running_loop()
     for sig in (signal.SIGINT, signal.SIGTERM):
@@ -39,10 +39,10 @@ async def main(address: str, out_file: str = "ble_log.txt") -> None:
             pass
 
     state = await dump_gatt.prepare_connection(address)
-    target = state.device if state.device is not None else state.address
+    target = dump_gatt.client_target_for_state(state)
 
     async with BleakClient(target, timeout=20.0) as client:
-        print(f"Connected: {client.is_connected}")
+        print(f"Connected: {client.is_connected}", flush=True)
         if not client.is_connected:
             raise RuntimeError("Failed to connect")
 
@@ -51,7 +51,7 @@ async def main(address: str, out_file: str = "ble_log.txt") -> None:
 
             def notify_handler(sender: Any, data: bytearray) -> None:
                 line = f"{ts()} NOTIFY sender={sender} hex={bytes(data).hex()} raw={bytes(data)!r}\n"
-                print(line, end="")
+                print(line, end="", flush=True)
                 fh.write(line)
                 fh.flush()
 
@@ -66,19 +66,19 @@ async def main(address: str, out_file: str = "ble_log.txt") -> None:
                     if "read" in props:
                         read_chars.append(char.uuid)
 
-            print("Subscribing to notifiable characteristics...")
+            print("Subscribing to notifiable characteristics...", flush=True)
             for uuid in notify_chars:
                 try:
                     await client.start_notify(uuid, notify_handler)
                     line = f"{ts()} SUBSCRIBED {uuid}\n"
                 except Exception as exc:
                     line = f"{ts()} SUBSCRIBE_FAILED {uuid} error={exc}\n"
-                print(line, end="")
+                print(line, end="", flush=True)
                 fh.write(line)
 
             fh.flush()
 
-            print("Polling readable characteristics every 10 seconds. Ctrl-C to stop.")
+            print("Polling readable characteristics every 10 seconds. Ctrl-C to stop.", flush=True)
             while not STOP.is_set():
                 for uuid in read_chars:
                     try:
@@ -86,13 +86,13 @@ async def main(address: str, out_file: str = "ble_log.txt") -> None:
                         line = f"{ts()} READ uuid={uuid} hex={bytes(data).hex()} raw={bytes(data)!r}\n"
                     except Exception as exc:
                         line = f"{ts()} READ_FAILED uuid={uuid} error={exc}\n"
-                    print(line, end="")
+                    print(line, end="", flush=True)
                     fh.write(line)
 
                 fh.flush()
                 await asyncio.sleep(10)
 
-            print("Stopping notifications...")
+            print("Stopping notifications...", flush=True)
             for uuid in notify_chars:
                 try:
                     await client.stop_notify(uuid)

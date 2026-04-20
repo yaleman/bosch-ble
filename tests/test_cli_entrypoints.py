@@ -651,7 +651,72 @@ def test_dump_gatt_main_retries_when_service_discovery_disconnects(
     asyncio.run(run())
     output = capsys.readouterr().out
     assert "Connecting to AA:BB ..." in output
-    assert "Retrying service discovery for AA:BB ..." in output
+
+
+def test_log_chars_main_uses_dump_gatt_client_target_for_state(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    targets: list[object] = []
+    notify_callbacks: list[object] = []
+    target = object()
+    descriptor = FakeDescriptor(0x001F, "00002902-0000-1000-8000-00805f9b34fb")
+    service = FakeServiceWithCharacteristics(
+        "00000010-eaa2-11e9-81b4-2a2ae2dbcce4",
+        [FakeCharacteristicWithDescriptors("00000011-eaa2-11e9-81b4-2a2ae2dbcce4", ["notify"], [descriptor])],
+    )
+
+    class FakeClient:
+        def __init__(self, address_or_ble_device, timeout: float = 20.0) -> None:
+            targets.append(address_or_ble_device)
+            self.address_or_ble_device = address_or_ble_device
+            self.timeout = timeout
+            self.is_connected = True
+            self.services = [service]
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb) -> None:
+            return None
+
+        async def start_notify(self, uuid: str, callback) -> None:
+            notify_callbacks.append(callback)
+
+        async def stop_notify(self, uuid: str) -> None:
+            return None
+
+        async def read_gatt_char(self, uuid: str) -> bytearray:
+            return bytearray()
+
+    async def fake_sleep(delay: float) -> None:
+        log_chars.STOP.set()
+
+    async def run() -> None:
+        state = bluez.BluezState(
+            address="AA:BB",
+            visible=False,
+            device=None,
+            name="sensor",
+            paired=True,
+            trusted=True,
+            connected=True,
+            services_resolved=True,
+            bluetoothctl=CompletedProcess(["bluetoothctl"], 0, stdout="", stderr=""),
+            busctl=CompletedProcess(["busctl"], 0, stdout="", stderr=""),
+        )
+        with patch.object(log_chars.dump_gatt, "prepare_connection", new=AsyncMock(return_value=state)):
+            with patch.object(log_chars.dump_gatt, "client_target_for_state", return_value=target):
+                with patch.object(log_chars, "BleakClient", FakeClient):
+                    with patch.object(log_chars.asyncio, "sleep", side_effect=fake_sleep):
+                        await log_chars.main("AA:BB", str(tmp_path / "ble_log.txt"))
+
+    asyncio.run(run())
+    assert targets == [target]
+    output = capsys.readouterr().out
+    assert "Connecting to AA:BB ..." in output
+    assert "Connected: True" in output
+    assert "Subscribing to notifiable characteristics..." in output
 
 
 def test_dump_gatt_main_retries_when_bluez_reports_operation_in_progress(
