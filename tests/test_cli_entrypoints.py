@@ -432,6 +432,64 @@ def test_dump_gatt_main_can_connect_by_address_when_scan_cannot_find_device(
     assert "Connecting to AA:BB ..." in output
 
 
+def test_dump_gatt_main_uses_bluez_device_path_when_connected_but_not_visible(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    targets: list[object] = []
+
+    class FakeClient:
+        def __init__(self, address_or_ble_device, timeout: float = 20.0) -> None:
+            targets.append(address_or_ble_device)
+            self.address_or_ble_device = address_or_ble_device
+            self.timeout = timeout
+            self.is_connected = True
+            self.services = []
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb) -> None:
+            return None
+
+    async def run() -> None:
+        missing_state = bluez.BluezState(
+            address="AA:BB",
+            visible=False,
+            device=None,
+            name="sensor",
+            paired=True,
+            trusted=True,
+            connected=True,
+            services_resolved=True,
+            bluetoothctl=CompletedProcess(["bluetoothctl"], 0, stdout="", stderr=""),
+            busctl=CompletedProcess(["busctl"], 0, stdout="", stderr=""),
+        )
+        with patch.object(
+            dump_gatt.bluez,
+            "preflight_device",
+            new=AsyncMock(return_value=missing_state),
+        ):
+            with patch.object(
+                dump_gatt.bluez,
+                "assist_connection",
+                new=AsyncMock(return_value=missing_state),
+            ):
+                with patch.object(
+                    dump_gatt.bluez,
+                    "find_device_object_path",
+                    return_value="/org/bluez/hci0/dev_AA_BB",
+                ):
+                    with patch.object(dump_gatt, "BleakClient", FakeClient):
+                        await dump_gatt.main("AA:BB")
+
+    asyncio.run(run())
+    assert len(targets) == 1
+    assert getattr(targets[0], "address", None) == "AA:BB"
+    assert getattr(targets[0], "details", {}).get("path") == "/org/bluez/hci0/dev_AA_BB"
+    output = capsys.readouterr().out
+    assert "Connecting to AA:BB ..." in output
+
+
 def test_dump_gatt_main_skips_wait_when_service_resolution_is_unavailable(
     capsys: pytest.CaptureFixture[str],
 ) -> None:

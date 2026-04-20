@@ -6,6 +6,7 @@ import sys
 
 from bleak import BleakClient
 from bleak.backends.characteristic import CharacteristicPropertyName
+from bleak.backends.device import BLEDevice
 
 from bosch_ble import bluez
 
@@ -110,13 +111,26 @@ async def prepare_connection(address: str) -> bluez.BluezState:
     )
 
 
+def client_target_for_state(state: bluez.BluezState) -> object:
+    if state.device is not None:
+        return state.device
+    device_path = bluez.find_device_object_path(state.address)
+    if device_path is not None:
+        return BLEDevice(
+            state.address,
+            state.name,
+            {"path": device_path},
+        )
+    return state.address
+
+
 async def main(address: str) -> None:
     print(f"Connecting to {address} ...")
     last_error: Exception | None = None
     for attempt in range(1, DISCOVERY_RETRY_ATTEMPTS + 1):
         try:
             state = await prepare_connection(address)
-            target = state.device if state.device is not None else state.address
+            target = client_target_for_state(state)
             async with BleakClient(target, timeout=20.0) as client:
                 print(f"Connected: {client.is_connected}")
                 if not client.is_connected:
