@@ -18,7 +18,9 @@ class MessageType(IntEnum):
     NOTIFY = 0xA
 
 
-MOBILE_APP_ADDRESS_NAMES: dict[int, str] = {
+ADDRESS_NAMES: dict[int, str] = {
+    0x181E: "DRIVE_UNIT_PRESENT_ASSIST_FACTOR",
+    0x182D: "DRIVE_UNIT_DISPLAYED_BIKE_SPEED",
     0x4081: "UI_PRIORITY",
     0x4082: "FEATURE_STREAMING_ALERT",
     0x4085: "ALTITUDE",
@@ -39,6 +41,7 @@ MOBILE_APP_ADDRESS_NAMES: dict[int, str] = {
     0x40A4: "USER_INFO",
     0x40A8: "SPEED",
     0x40A9: "STARTUP_STAGE",
+    0xF809: "ASSIST_MODE_USAGE",
 }
 
 
@@ -52,7 +55,7 @@ class DirectedFrame:
 
     @property
     def target_name(self) -> str | None:
-        return MOBILE_APP_ADDRESS_NAMES.get(self.destination)
+        return ADDRESS_NAMES.get(self.destination)
 
 
 def _decode_address(high: int, low: int) -> int:
