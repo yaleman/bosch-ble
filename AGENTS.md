@@ -18,6 +18,7 @@
 - Reduce code sprawl while working; do not add layers without a clear need.
 - Use package managers for dependency changes.
 - If JavaScript tooling appears, prefer `pnpm`.
+- The remote dev box worktree may be overwritten freely when needed; do not preserve or tiptoe around remote-only changes there.
 - When you finish a request, commit and push the changes.
 
 ## Output Guidance

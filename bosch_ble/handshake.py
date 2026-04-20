@@ -10,7 +10,7 @@ from typing import Any
 
 from bleak import BleakClient
 
-from bosch_ble import dump_gatt, mcsp
+from bosch_ble import dump_gatt, mcsp, messagebus as messagebus_mod
 
 
 HANDSHAKE_TIMEOUT_SECONDS = 10.0
@@ -18,6 +18,8 @@ POST_HANDSHAKE_WAIT_SECONDS = 1.0
 NON_COMMAND_CHANNELS = tuple(
     channel for channel in mcsp.McspChannel if channel is not mcsp.McspChannel.COMMAND
 )
+STARTUP_WRITE_ADDRESSES = {0x40A9}
+STARTUP_RPC_ADDRESSES = {0x409C}
 
 
 def ts() -> str:
@@ -88,6 +90,75 @@ def build_handshake_response(
     return [mcsp.encode_command_frame(command) for command in response_commands]
 
 
+def build_startup_response_packets(messagebus: bytes) -> list[bytes]:
+    frame = mcsp.decode_frame(messagebus)
+    if frame.channel is mcsp.McspChannel.COMMAND:
+        return []
+
+    decoded = messagebus_mod.decode_message_frame(frame.payload)
+    if not isinstance(decoded, messagebus_mod.DirectedFrame):
+        return []
+
+    responses: list[bytes] = []
+    payload = messagebus_mod.STARTUP_PROVIDER_PAYLOADS.get(decoded.destination)
+    if decoded.message_type is messagebus_mod.MessageType.READ:
+        if payload is None:
+            responses.append(
+                messagebus_mod.encode_read_response(
+                    decoded,
+                    b"",
+                    status_code=messagebus_mod.ResponseStatusCode.UNSUPPORTED,
+                )
+            )
+        else:
+            responses.append(messagebus_mod.encode_read_response(decoded, payload))
+    elif decoded.message_type is messagebus_mod.MessageType.SUBSCRIBE:
+        if payload is None:
+            responses.append(
+                messagebus_mod.encode_subscribe_response(
+                    decoded,
+                    status_code=messagebus_mod.ResponseStatusCode.UNSUPPORTED,
+                )
+            )
+        else:
+            responses.append(messagebus_mod.encode_subscribe_response(decoded))
+            responses.append(messagebus_mod.encode_notify(decoded.destination, payload))
+    elif decoded.message_type is messagebus_mod.MessageType.WRITE:
+        if (
+            decoded.destination in STARTUP_WRITE_ADDRESSES
+            or decoded.destination in messagebus_mod.STARTUP_PROVIDER_PAYLOADS
+        ):
+            responses.append(messagebus_mod.encode_write_response(decoded))
+        else:
+            responses.append(
+                messagebus_mod.encode_write_response(
+                    decoded,
+                    status_code=messagebus_mod.ResponseStatusCode.UNSUPPORTED,
+                )
+            )
+    elif decoded.message_type is messagebus_mod.MessageType.RPC:
+        if decoded.destination in STARTUP_RPC_ADDRESSES:
+            responses.append(messagebus_mod.encode_rpc_response(decoded))
+        else:
+            responses.append(
+                messagebus_mod.encode_rpc_response(
+                    decoded,
+                    status_code=messagebus_mod.ResponseStatusCode.UNSUPPORTED,
+                )
+            )
+
+    return [
+        mcsp.encode_frame(
+            mcsp.Frame(
+                end_of_channel=True,
+                channel=frame.channel,
+                payload=response,
+            )
+        )
+        for response in responses
+    ]
+
+
 async def main(address: str, out_file: str = "ble_handshake.txt") -> None:
     path = Path(out_file)
     print(f"Connecting to {address} ...", flush=True)
@@ -112,10 +183,25 @@ async def main(address: str, out_file: str = "ble_handshake.txt") -> None:
         receive_uuid, send_uuid = find_mcsp_transport(client.services)
 
         with path.open("a", encoding="utf-8") as fh:
+            background_tasks: set[asyncio.Task[None]] = set()
+            handshake_complete = False
+
             def emit(line: str) -> None:
                 print(line, flush=True)
                 fh.write(f"{line}\n")
                 fh.flush()
+
+            async def send_packets(packets: list[bytes]) -> None:
+                for packet in packets:
+                    emit(f"{ts()} SEND hex={packet.hex()}")
+                    await client.write_gatt_char(send_uuid, packet, response=False)
+
+            def schedule_packets(packets: list[bytes]) -> None:
+                if not packets:
+                    return
+                task = loop.create_task(send_packets(packets))
+                background_tasks.add(task)
+                task.add_done_callback(background_tasks.discard)
 
             emit(f"{ts()} CONNECTED {address}")
             handshake_future: asyncio.Future[list[mcsp.Command]] = loop.create_future()
@@ -134,6 +220,10 @@ async def main(address: str, out_file: str = "ble_handshake.txt") -> None:
                         f"{ts()} FRAME channel={frame.channel.name} end={frame.end_of_channel} hex={frame.payload.hex()}"
                     )
                     if frame.channel is not mcsp.McspChannel.COMMAND:
+                        if handshake_complete:
+                            schedule_packets(
+                                build_startup_response_packets(mcsp.encode_frame(frame))
+                            )
                         continue
                     try:
                         command = mcsp.decode_command_frame(frame)
@@ -151,12 +241,13 @@ async def main(address: str, out_file: str = "ble_handshake.txt") -> None:
                     handshake_future,
                     timeout=HANDSHAKE_TIMEOUT_SECONDS,
                 )
-                for packet in build_handshake_response(commands):
-                    emit(f"{ts()} SEND hex={packet.hex()}")
-                    await client.write_gatt_char(send_uuid, packet, response=False)
+                handshake_complete = True
+                await send_packets(build_handshake_response(commands))
                 if not stop.is_set():
                     await asyncio.sleep(POST_HANDSHAKE_WAIT_SECONDS)
             finally:
+                if background_tasks:
+                    await asyncio.gather(*background_tasks, return_exceptions=True)
                 await client.stop_notify(receive_uuid)
 
 
