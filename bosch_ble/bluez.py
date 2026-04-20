@@ -423,17 +423,20 @@ async def pairing_agent(address: str):
 
 
 async def assist_connection(address: str, verbose: bool = False) -> BluezState:
-    steps = [
-        ("bluetoothctl info", ["bluetoothctl", "info", address]),
-        ("bluetoothctl pair", ["bluetoothctl", "pair", address]),
-        ("bluetoothctl trust", ["bluetoothctl", "trust", address]),
-        ("bluetoothctl connect", ["bluetoothctl", "connect", address]),
-    ]
+    info_result = await run_command_async(["bluetoothctl", "info", address])
+    info_state = build_state(address, info_result, None)
+    steps = [("bluetoothctl info", ["bluetoothctl", "info", address], info_result)]
+    if info_state.paired is not True:
+        steps.append(("bluetoothctl pair", ["bluetoothctl", "pair", address], None))
+    if info_state.trusted is not True:
+        steps.append(("bluetoothctl trust", ["bluetoothctl", "trust", address], None))
+    steps.append(("bluetoothctl connect", ["bluetoothctl", "connect", address], None))
 
     connect_result: subprocess.CompletedProcess[str] | None = None
     async with pairing_agent(address):
-        for title, argv in steps:
-            result = await run_command_async(argv)
+        for title, argv, result in steps:
+            if result is None:
+                result = await run_command_async(argv)
             if verbose:
                 print_section(title, result)
             if argv[:2] == ["bluetoothctl", "connect"]:

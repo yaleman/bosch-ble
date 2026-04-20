@@ -327,10 +327,65 @@ def test_assist_connection_runs_pair_trust_connect_inside_pairing_agent() -> Non
 
     asyncio.run(run())
     assert events == [
-        ("agent_enter", "AA:BB"),
         ("bluetoothctl", "info", "AA:BB"),
+        ("agent_enter", "AA:BB"),
         ("bluetoothctl", "pair", "AA:BB"),
         ("bluetoothctl", "trust", "AA:BB"),
+        ("bluetoothctl", "connect", "AA:BB"),
+        ("agent_exit", "AA:BB"),
+    ]
+
+
+def test_assist_connection_skips_pair_and_trust_when_device_is_already_bonded() -> None:
+    events: list[object] = []
+    info_result = CompletedProcess(
+        ["bluetoothctl", "info", "AA:BB"],
+        0,
+        stdout="Paired: yes\nTrusted: yes\nConnected: no\n",
+        stderr="",
+    )
+    connect_result = CompletedProcess(["bluetoothctl", "connect", "AA:BB"], 0, stdout="Connected: yes\n", stderr="")
+    connected_state = bluez.BluezState(
+        address="AA:BB",
+        visible=True,
+        device=None,
+        name="sensor",
+        paired=True,
+        trusted=True,
+        connected=True,
+        services_resolved=None,
+        bluetoothctl=CompletedProcess(["bluetoothctl"], 0, stdout="Connected: yes\n", stderr=""),
+        busctl=None,
+    )
+
+    @asynccontextmanager
+    async def fake_pairing_agent(address: str):
+        events.append(("agent_enter", address))
+        try:
+            yield
+        finally:
+            events.append(("agent_exit", address))
+
+    async def run() -> None:
+        async def fake_run_command(argv: list[str], timeout: float = 15.0) -> CompletedProcess[str]:
+            events.append(tuple(argv))
+            results = {
+                ("bluetoothctl", "info", "AA:BB"): info_result,
+                ("bluetoothctl", "connect", "AA:BB"): connect_result,
+            }
+            return results[tuple(argv)]
+
+        with patch.object(bluez, "pairing_agent", side_effect=fake_pairing_agent):
+            with patch.object(bluez, "run_command_async", side_effect=fake_run_command):
+                with patch.object(bluez, "read_device_state", return_value=connected_state):
+                    result = await bluez.assist_connection("AA:BB")
+
+        assert result is connected_state
+
+    asyncio.run(run())
+    assert events == [
+        ("bluetoothctl", "info", "AA:BB"),
+        ("agent_enter", "AA:BB"),
         ("bluetoothctl", "connect", "AA:BB"),
         ("agent_exit", "AA:BB"),
     ]
