@@ -9,7 +9,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from bosch_ble import bluez, dump_gatt, log_chars
+from bosch_ble import bluez, dump_gatt, log_chars, probe
 
 
 class FakeDescriptor:
@@ -51,6 +51,15 @@ def test_dump_gatt_cli_runs_async_main_with_address() -> None:
             dump_gatt.cli()
 
     patched_main.assert_called_once_with("AA:BB")
+
+
+def test_probe_cli_shows_usage_without_address(capsys: pytest.CaptureFixture[str]) -> None:
+    with patch("sys.argv", ["bosch-ble-probe"]):
+        with pytest.raises(SystemExit) as excinfo:
+            probe.cli()
+
+    assert excinfo.value.code == 2
+    assert "Usage: bosch-ble-probe <BLE_ADDRESS> [output_file]" in capsys.readouterr().out
 
 
 def test_dump_gatt_cli_prints_friendly_error(capsys: pytest.CaptureFixture[str]) -> None:
@@ -717,6 +726,107 @@ def test_log_chars_main_uses_dump_gatt_client_target_for_state(
     assert "Connecting to AA:BB ..." in output
     assert "Connected: True" in output
     assert "Subscribing to notifiable characteristics..." in output
+
+
+def test_probe_main_uses_dump_gatt_target_and_logs_probe_results(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    targets: list[object] = []
+    writes: list[tuple[str, bytes, bool]] = []
+    callbacks: dict[str, object] = {}
+    target = object()
+
+    notify_char = FakeCharacteristicWithDescriptors(
+        "00000011-eaa2-11e9-81b4-2a2ae2dbcce4",
+        ["notify"],
+        [FakeDescriptor(0x001F, "00002902-0000-1000-8000-00805f9b34fb")],
+    )
+    write_char = FakeCharacteristicWithDescriptors(
+        "00000012-eaa2-11e9-81b4-2a2ae2dbcce4",
+        ["write-without-response"],
+        [],
+    )
+    read_char = FakeCharacteristicWithDescriptors(
+        "00000041-eaa2-11e9-81b4-2a2ae2dbcce4",
+        ["read"],
+        [],
+    )
+    services = [
+        FakeServiceWithCharacteristics(
+            "00000010-eaa2-11e9-81b4-2a2ae2dbcce4",
+            [notify_char, write_char],
+        ),
+        FakeServiceWithCharacteristics(
+            "00000040-eaa2-11e9-81b4-2a2ae2dbcce4",
+            [read_char],
+        ),
+    ]
+
+    class FakeClient:
+        def __init__(self, address_or_ble_device, timeout: float = 20.0) -> None:
+            targets.append(address_or_ble_device)
+            self.address_or_ble_device = address_or_ble_device
+            self.timeout = timeout
+            self.is_connected = True
+            self.services = services
+            self.read_values = {
+                "00000041-eaa2-11e9-81b4-2a2ae2dbcce4": bytearray(b"\x18\x00"),
+            }
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb) -> None:
+            return None
+
+        async def start_notify(self, uuid: str, callback) -> None:
+            callbacks[uuid] = callback
+
+        async def stop_notify(self, uuid: str) -> None:
+            return None
+
+        async def read_gatt_char(self, uuid: str) -> bytearray:
+            return self.read_values[uuid]
+
+        async def write_gatt_char(self, uuid: str, data: bytes, response: bool = False) -> None:
+            writes.append((uuid, data, response))
+            self.read_values["00000041-eaa2-11e9-81b4-2a2ae2dbcce4"] = bytearray(b"\x19\x00")
+            callback = callbacks["00000011-eaa2-11e9-81b4-2a2ae2dbcce4"]
+            callback("notify-sender", bytearray(b"\x10\x02"))
+
+    async def fake_sleep(delay: float) -> None:
+        return None
+
+    async def run() -> None:
+        state = bluez.BluezState(
+            address="AA:BB",
+            visible=False,
+            device=None,
+            name="sensor",
+            paired=True,
+            trusted=True,
+            connected=True,
+            services_resolved=True,
+            bluetoothctl=CompletedProcess(["bluetoothctl"], 0, stdout="", stderr=""),
+            busctl=CompletedProcess(["busctl"], 0, stdout="", stderr=""),
+        )
+        with patch.object(probe.dump_gatt, "prepare_connection", new=AsyncMock(return_value=state)):
+            with patch.object(probe.dump_gatt, "client_target_for_state", return_value=target):
+                with patch.object(probe, "BleakClient", FakeClient):
+                    with patch.object(probe.asyncio, "sleep", side_effect=fake_sleep):
+                        with patch.object(probe, "PROBE_TARGET_UUIDS", ("00000012-eaa2-11e9-81b4-2a2ae2dbcce4",)):
+                            with patch.object(probe, "PROBE_PAYLOADS", (b"\x01",)):
+                                await probe.main("AA:BB", str(tmp_path / "probe.log"))
+
+    asyncio.run(run())
+    assert targets == [target]
+    assert writes == [("00000012-eaa2-11e9-81b4-2a2ae2dbcce4", b"\x01", False)]
+    output = capsys.readouterr().out
+    assert "Connecting to AA:BB ..." in output
+    assert "PROBE uuid=00000012-eaa2-11e9-81b4-2a2ae2dbcce4 payload=01" in output
+    assert "NOTIFY sender=notify-sender hex=1002" in output
+    assert "READ_CHANGE uuid=00000041-eaa2-11e9-81b4-2a2ae2dbcce4 before=1800 after=1900" in output
 
 
 def test_dump_gatt_main_retries_when_bluez_reports_operation_in_progress(
