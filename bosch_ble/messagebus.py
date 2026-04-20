@@ -56,6 +56,8 @@ ADDRESS_NAMES: dict[int, str] = {
     0x4098: "NAVIGATION_ETA",
     0x4099: "NAVIGATION_TIME_TO_DESTINATION",
     0x409A: "ALTITUDE_GRAPH_AVAILABLE_SAMPLES",
+    0x409C: "UPDATE_ISSUE_VISUALIZATION",
+    0x409D: "VISUALIZABLE_ISSUE_TYPES",
     0x409F: "MOBILE_APP_FEATURE_PROPERTIES_RELEASE4",
     0x40A2: "SYSTEM_STATE_OF_CHARGE_FOR_RIDER_AT_DESTINATION",
     0x40A3: "PHONE_CHARGING",
@@ -81,6 +83,7 @@ STARTUP_PROVIDER_PAYLOADS: dict[int, bytes] = {
     0x4098: b"",
     0x4099: b"",
     0x409A: b"",
+    0x409D: bytes.fromhex("0800080108020803"),
     0x409F: bytes.fromhex("0801"),
     0x40A2: b"",
     0x40A3: b"",
@@ -233,6 +236,19 @@ def encode_write_response(
     return _encode_response(
         request,
         MessageType.WRITE_RESPONSE,
+        payload=payload,
+        status_code=status_code,
+    )
+
+
+def encode_rpc_response(
+    request: DirectedFrame,
+    payload: bytes = b"",
+    status_code: ResponseStatusCode = ResponseStatusCode.SUCCESS,
+) -> bytes:
+    return _encode_response(
+        request,
+        MessageType.RPC_RESPONSE,
         payload=payload,
         status_code=status_code,
     )

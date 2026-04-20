@@ -29,6 +29,28 @@ def test_decode_directed_frame_parses_feature_properties_read() -> None:
     assert frame.target_name == "MOBILE_APP_FEATURE_PROPERTIES_RELEASE4"
 
 
+def test_decode_directed_frame_parses_visualizable_issue_types_read() -> None:
+    frame = messagebus.decode_directed_frame(bytes.fromhex("2150c09d01"))
+
+    assert frame.source == 0x2150
+    assert frame.destination == 0x409D
+    assert frame.message_type is messagebus.MessageType.READ
+    assert frame.sequence == 1
+    assert frame.payload == b""
+    assert frame.target_name == "VISUALIZABLE_ISSUE_TYPES"
+
+
+def test_decode_directed_frame_parses_update_issue_visualization_rpc() -> None:
+    frame = messagebus.decode_directed_frame(bytes.fromhex("2150c09c41"))
+
+    assert frame.source == 0x2150
+    assert frame.destination == 0x409C
+    assert frame.message_type is messagebus.MessageType.RPC
+    assert frame.sequence == 1
+    assert frame.payload == b""
+    assert frame.target_name == "UPDATE_ISSUE_VISUALIZATION"
+
+
 def test_decode_directed_frame_parses_mobile_app_subscribe() -> None:
     frame = messagebus.decode_directed_frame(bytes.fromhex("2002c0a460"))
 
@@ -79,6 +101,14 @@ def test_encode_read_response_matches_android_wire_shape() -> None:
     assert encoded.hex() == "409fa150110801"
 
 
+def test_encode_read_response_matches_visualizable_issue_types_wire_shape() -> None:
+    request = messagebus.decode_directed_frame("2150c09d01")
+
+    encoded = messagebus.encode_read_response(request, bytes.fromhex("0800080108020803"))
+
+    assert encoded.hex() == "409da150110800080108020803"
+
+
 def test_encode_subscribe_response_and_notify_match_android_wire_shape() -> None:
     request = messagebus.decode_directed_frame("2002c0a360")
 
@@ -87,6 +117,14 @@ def test_encode_subscribe_response_and_notify_match_android_wire_shape() -> None
 
     assert response.hex() == "40a3a00270"
     assert notify.hex() == "c0a3"
+
+
+def test_encode_rpc_response_matches_empty_success_wire_shape() -> None:
+    request = messagebus.decode_directed_frame("2150c09c41")
+
+    encoded = messagebus.encode_rpc_response(request)
+
+    assert encoded.hex() == "409ca15051"
 
 
 def test_validate_handshake_log_accepts_known_startup_burst() -> None:

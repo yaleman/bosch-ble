@@ -278,6 +278,34 @@ def test_build_startup_response_packets_answers_reads_and_subscribes() -> None:
     ]
 
 
+def test_build_startup_response_packets_answers_visualizable_issue_types() -> None:
+    packets = handshake.build_startup_response_packets(
+        messagebus=mcsp.encode_frame(
+            mcsp.Frame(
+                end_of_channel=True,
+                channel=mcsp.McspChannel.CHANNEL1,
+                payload=bytes.fromhex("2150c09d01"),
+            )
+        )
+    )
+
+    assert [packet.hex() for packet in packets] == ["300d409da150110800080108020803"]
+
+
+def test_build_startup_response_packets_answers_update_issue_visualization_rpc() -> None:
+    packets = handshake.build_startup_response_packets(
+        messagebus=mcsp.encode_frame(
+            mcsp.Frame(
+                end_of_channel=True,
+                channel=mcsp.McspChannel.CHANNEL1,
+                payload=bytes.fromhex("2150c09c41"),
+            )
+        )
+    )
+
+    assert [packet.hex() for packet in packets] == ["3005409ca15051"]
+
+
 def test_build_startup_response_packets_returns_unsupported_for_unmapped_request() -> None:
     packets = handshake.build_startup_response_packets(
         messagebus=mcsp.encode_frame(

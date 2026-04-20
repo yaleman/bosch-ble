@@ -19,6 +19,7 @@ NON_COMMAND_CHANNELS = tuple(
     channel for channel in mcsp.McspChannel if channel is not mcsp.McspChannel.COMMAND
 )
 STARTUP_WRITE_ADDRESSES = {0x40A9}
+STARTUP_RPC_ADDRESSES = {0x409C}
 
 
 def ts() -> str:
@@ -131,6 +132,16 @@ def build_startup_response_packets(messagebus: bytes) -> list[bytes]:
         else:
             responses.append(
                 messagebus_mod.encode_write_response(
+                    decoded,
+                    status_code=messagebus_mod.ResponseStatusCode.UNSUPPORTED,
+                )
+            )
+    elif decoded.message_type is messagebus_mod.MessageType.RPC:
+        if decoded.destination in STARTUP_RPC_ADDRESSES:
+            responses.append(messagebus_mod.encode_rpc_response(decoded))
+        else:
+            responses.append(
+                messagebus_mod.encode_rpc_response(
                     decoded,
                     status_code=messagebus_mod.ResponseStatusCode.UNSUPPORTED,
                 )
