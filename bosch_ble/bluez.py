@@ -12,7 +12,7 @@ from typing import Annotated, Any
 from uuid import uuid4
 
 from bleak import BleakScanner
-from dbus_fast import DBusError
+from dbus_fast import DBusError, Variant
 from dbus_fast.annotations import DBusObjectPath, DBusSignature, DBusStr, DBusUInt16, DBusUInt32
 from dbus_fast.aio import MessageBus
 from dbus_fast.constants import BusType
@@ -25,7 +25,9 @@ BLUEZ_SERVICE = "org.bluez"
 BLUEZ_ROOT_PATH = "/org/bluez"
 BLUEZ_AGENT_INTERFACE = "org.bluez.Agent1"
 BLUEZ_AGENT_MANAGER_INTERFACE = "org.bluez.AgentManager1"
-BLUEZ_AGENT_CAPABILITY = "DisplayYesNo"
+BLUEZ_DEVICE_INTERFACE = "org.bluez.Device1"
+DBUS_PROPERTIES_INTERFACE = "org.freedesktop.DBus.Properties"
+BLUEZ_AGENT_CAPABILITY = "KeyboardDisplay"
 BLUEZ_AGENT_BASE_PATH = "/org/bosch_ble"
 BLUEZ_REJECTED_ERROR = "org.bluez.Error.Rejected"
 DBusEmpty = Annotated[None, DBusSignature("")]
@@ -40,6 +42,17 @@ BUSY_PROCESS_PATTERNS = (
     "bluetoothctl pair",
     "bluetoothctl trust",
 )
+
+
+def log_agent_event(message: str) -> None:
+    path = os.environ.get("BOSCH_BLE_AGENT_LOG")
+    if not path:
+        return
+    try:
+        with open(path, "a", encoding="utf-8") as handle:
+            handle.write(f"{message}\n")
+    except OSError:
+        pass
 
 
 @dataclass(slots=True)
@@ -346,26 +359,32 @@ class AutoConfirmBluezAgent(ServiceInterface):
 
     def _authorize_device(self, device: str) -> None:
         if device.endswith(self.device_suffix):
+            log_agent_event(f"authorize ok {device}")
             return
+        log_agent_event(f"authorize reject {device}")
         raise DBusError(BLUEZ_REJECTED_ERROR, f"Refusing pairing request for unexpected device {device}")
 
     @method()
     def Release(self) -> DBusEmpty:
+        log_agent_event("Release")
         return None
 
     @method()
     def RequestPinCode(self, device: DBusObjectPath) -> DBusStr:
         self._authorize_device(device)
+        log_agent_event(f"RequestPinCode {device}")
         raise DBusError(BLUEZ_REJECTED_ERROR, "PIN code entry is not supported")
 
     @method()
     def DisplayPinCode(self, device: DBusObjectPath, pincode: DBusStr) -> DBusEmpty:
         self._authorize_device(device)
+        log_agent_event(f"DisplayPinCode {device} {pincode}")
         return None
 
     @method()
     def RequestPasskey(self, device: DBusObjectPath) -> DBusUInt32:
         self._authorize_device(device)
+        log_agent_event(f"RequestPasskey {device}")
         raise DBusError(BLUEZ_REJECTED_ERROR, "Passkey entry is not supported")
 
     @method()
@@ -376,25 +395,30 @@ class AutoConfirmBluezAgent(ServiceInterface):
         entered: DBusUInt16,
     ) -> DBusEmpty:
         self._authorize_device(device)
+        log_agent_event(f"DisplayPasskey {device} {passkey:06d} entered={entered}")
         return None
 
     @method()
     def RequestConfirmation(self, device: DBusObjectPath, passkey: DBusUInt32) -> DBusEmpty:
         self._authorize_device(device)
+        log_agent_event(f"RequestConfirmation {device} {passkey:06d}")
         return None
 
     @method()
     def RequestAuthorization(self, device: DBusObjectPath) -> DBusEmpty:
         self._authorize_device(device)
+        log_agent_event(f"RequestAuthorization {device}")
         return None
 
     @method()
     def AuthorizeService(self, device: DBusObjectPath, uuid: DBusStr) -> DBusEmpty:
         self._authorize_device(device)
+        log_agent_event(f"AuthorizeService {device} {uuid}")
         return None
 
     @method()
     def Cancel(self) -> DBusEmpty:
+        log_agent_event("Cancel")
         return None
 
 
@@ -407,6 +431,7 @@ async def pairing_agent(address: str):
     introspection = await bus.introspect(BLUEZ_SERVICE, BLUEZ_ROOT_PATH)
     proxy = bus.get_proxy_object(BLUEZ_SERVICE, BLUEZ_ROOT_PATH, introspection)
     manager = proxy.get_interface(BLUEZ_AGENT_MANAGER_INTERFACE)
+    log_agent_event(f"register {path} capability={BLUEZ_AGENT_CAPABILITY} address={address}")
     await manager.call_register_agent(path, BLUEZ_AGENT_CAPABILITY)
     try:
         await manager.call_request_default_agent(path)
@@ -414,6 +439,7 @@ async def pairing_agent(address: str):
             yield
         finally:
             try:
+                log_agent_event(f"unregister {path}")
                 await manager.call_unregister_agent(path)
             except Exception:
                 pass
@@ -422,28 +448,91 @@ async def pairing_agent(address: str):
         bus.disconnect()
 
 
+async def bluez_pair_device(address: str) -> subprocess.CompletedProcess[str]:
+    device_path = find_device_object_path(address)
+    if device_path is None:
+        return subprocess.CompletedProcess(
+            ["bluez", "pair", address],
+            1,
+            stdout="",
+            stderr=f"Device {address} not available\n",
+        )
+
+    bus = await MessageBus(bus_type=BusType.SYSTEM).connect()
+    try:
+        introspection = await bus.introspect(BLUEZ_SERVICE, device_path)
+        proxy = bus.get_proxy_object(BLUEZ_SERVICE, device_path, introspection)
+        device = proxy.get_interface(BLUEZ_DEVICE_INTERFACE)
+        await device.call_pair()
+    except Exception as exc:
+        return subprocess.CompletedProcess(
+            ["bluez", "pair", address],
+            1,
+            stdout="",
+            stderr=f"{format_cli_error(exc)}\n",
+        )
+    finally:
+        bus.disconnect()
+
+    return subprocess.CompletedProcess(["bluez", "pair", address], 0, stdout="", stderr="")
+
+
+async def bluez_set_trusted(address: str, trusted: bool = True) -> subprocess.CompletedProcess[str]:
+    device_path = find_device_object_path(address)
+    if device_path is None:
+        return subprocess.CompletedProcess(
+            ["bluez", "trust", address],
+            1,
+            stdout="",
+            stderr=f"Device {address} not available\n",
+        )
+
+    bus = await MessageBus(bus_type=BusType.SYSTEM).connect()
+    try:
+        introspection = await bus.introspect(BLUEZ_SERVICE, device_path)
+        proxy = bus.get_proxy_object(BLUEZ_SERVICE, device_path, introspection)
+        props = proxy.get_interface(DBUS_PROPERTIES_INTERFACE)
+        await props.call_set(BLUEZ_DEVICE_INTERFACE, "Trusted", Variant("b", trusted))
+    except Exception as exc:
+        return subprocess.CompletedProcess(
+            ["bluez", "trust", address],
+            1,
+            stdout="",
+            stderr=f"{format_cli_error(exc)}\n",
+        )
+    finally:
+        bus.disconnect()
+
+    return subprocess.CompletedProcess(["bluez", "trust", address], 0, stdout="", stderr="")
+
+
 async def assist_connection(address: str, verbose: bool = False) -> BluezState:
     info_result = await run_command_async(["bluetoothctl", "info", address])
     info_state = build_state(address, info_result, None)
     steps = [("bluetoothctl info", ["bluetoothctl", "info", address], info_result)]
     if info_state.paired is not True:
-        steps.append(("bluetoothctl pair", ["bluetoothctl", "pair", address], None))
+        steps.append(("bluez pair", ["bluez", "pair", address], None))
     if info_state.trusted is not True:
-        steps.append(("bluetoothctl trust", ["bluetoothctl", "trust", address], None))
+        steps.append(("bluez trust", ["bluez", "trust", address], None))
     steps.append(("bluetoothctl connect", ["bluetoothctl", "connect", address], None))
 
     connect_result: subprocess.CompletedProcess[str] | None = None
     async with pairing_agent(address):
         for title, argv, result in steps:
             if result is None:
-                result = await run_command_async(argv)
+                if argv[:2] == ["bluez", "pair"]:
+                    result = await bluez_pair_device(address)
+                elif argv[:2] == ["bluez", "trust"]:
+                    result = await bluez_set_trusted(address)
+                else:
+                    result = await run_command_async(argv)
             if verbose:
                 print_section(title, result)
-            if argv[:2] == ["bluetoothctl", "pair"] and result.returncode != 0:
+            if argv[:2] == ["bluez", "pair"] and result.returncode != 0:
                 state = await asyncio.to_thread(read_device_state, address)
                 if state.paired is not True:
                     raise RuntimeError(f"BlueZ pair failed for {address}: {summarize_failure(result)}")
-            if argv[:2] == ["bluetoothctl", "trust"] and result.returncode != 0:
+            if argv[:2] == ["bluez", "trust"] and result.returncode != 0:
                 state = await asyncio.to_thread(read_device_state, address)
                 if state.trusted is not True:
                     raise RuntimeError(f"BlueZ trust failed for {address}: {summarize_failure(result)}")
