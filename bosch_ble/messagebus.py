@@ -51,6 +51,11 @@ ADDRESS_NAMES: dict[int, str] = {
     0x4087: "ASCENT",
     0x4088: "DESCENT",
     0x4089: "STATE_OF_CHARGE",
+    0x408A: "ROAD_SLOPE",
+    0x408B: "CURRENT_COUNTRY",
+    0x4091: "SOFTWARE_VERSION",
+    0x4092: "DATA_MODEL_VERSION",
+    0x4093: "MESSAGE_BUS_BUSINESS_LOGIC_VERSION",
     0x4094: "HEART_RATE",
     0x4095: "HEART_RATE_STATUS",
     0x4096: "NAVIGATION_CURRENT_STATUS",
@@ -69,6 +74,7 @@ ADDRESS_NAMES: dict[int, str] = {
     0x40A4: "USER_INFO",
     0x40A8: "SPEED",
     0x40A9: "STARTUP_STAGE",
+    0x40AA: "MOBILE_APP_STATIC_FEATURE_PROPERTIES",
     0xF809: "ASSIST_MODE_USAGE",
 }
 
@@ -81,6 +87,11 @@ STARTUP_PROVIDER_PAYLOADS: dict[int, bytes] = {
     0x4087: b"",
     0x4088: b"",
     0x4089: b"",
+    0x408A: b"",
+    0x408B: b"",
+    0x4091: b"",
+    0x4092: b"",
+    0x4093: b"",
     0x4094: b"",
     0x4095: b"",
     0x4096: b"",
@@ -96,6 +107,7 @@ STARTUP_PROVIDER_PAYLOADS: dict[int, bytes] = {
     0x40A3: b"",
     0x40A4: b"",
     0x40A8: b"",
+    0x40AA: b"",
 }
 
 

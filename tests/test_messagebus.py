@@ -40,6 +40,22 @@ def test_decode_directed_frame_parses_visualizable_issue_types_read() -> None:
     assert frame.target_name == "VISUALIZABLE_ISSUE_TYPES"
 
 
+def test_mobile_app_default_provider_addresses_are_named_and_supported() -> None:
+    expected = {
+        0x408A: "ROAD_SLOPE",
+        0x408B: "CURRENT_COUNTRY",
+        0x4091: "SOFTWARE_VERSION",
+        0x4092: "DATA_MODEL_VERSION",
+        0x4093: "MESSAGE_BUS_BUSINESS_LOGIC_VERSION",
+        0x40AA: "MOBILE_APP_STATIC_FEATURE_PROPERTIES",
+    }
+
+    for address, name in expected.items():
+        assert messagebus.ADDRESS_NAMES[address] == name
+        assert address in messagebus.STARTUP_PROVIDER_PAYLOADS
+        assert messagebus.STARTUP_PROVIDER_PAYLOADS[address] == b""
+
+
 def test_decode_directed_frame_parses_update_issue_visualization_rpc() -> None:
     frame = messagebus.decode_directed_frame(bytes.fromhex("2150c09c41"))
 
