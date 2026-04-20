@@ -156,6 +156,10 @@ def test_stage_bosch_security_pairs_after_insufficient_encryption() -> None:
         async def pair(self) -> None:
             events.append(("pair", "called"))
 
+    @asynccontextmanager
+    async def fake_pairing_agent(_address: str):
+        yield
+
     async def run() -> None:
         client = FakeClient()
         paired_state = bluez.BluezState(
@@ -175,7 +179,8 @@ def test_stage_bosch_security_pairs_after_insufficient_encryption() -> None:
             "wait_for_state",
             new=AsyncMock(return_value=paired_state),
         ) as wait_for_state:
-            await dump_gatt.stage_bosch_security(client, "AA:BB")
+            with patch.object(dump_gatt.bluez, "pairing_agent", fake_pairing_agent):
+                await dump_gatt.stage_bosch_security(client, "AA:BB")
 
         wait_for_state.assert_awaited_once_with(
             "AA:BB",
@@ -266,6 +271,10 @@ def test_stage_bosch_security_pairs_when_direct_cccd_write_is_blocked_on_unpaire
         async def pair(self) -> None:
             events.append(("pair", "called"))
 
+    @asynccontextmanager
+    async def fake_pairing_agent(_address: str):
+        yield
+
     async def run() -> None:
         initial_state = bluez.BluezState(
             address="AA:BB",
@@ -297,7 +306,8 @@ def test_stage_bosch_security_pairs_when_direct_cccd_write_is_blocked_on_unpaire
                 "wait_for_state",
                 new=AsyncMock(return_value=paired_state),
             ) as wait_for_state:
-                await dump_gatt.stage_bosch_security(FakeClient(), "AA:BB")
+                with patch.object(dump_gatt.bluez, "pairing_agent", fake_pairing_agent):
+                    await dump_gatt.stage_bosch_security(FakeClient(), "AA:BB")
 
         wait_for_state.assert_awaited_once_with(
             "AA:BB",

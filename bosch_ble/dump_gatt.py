@@ -58,6 +58,10 @@ def find_bosch_security_descriptor(services: object) -> object:
 
 
 async def stage_bosch_security(client: BleakClient, address: str) -> None:
+    async def pair_with_agent() -> None:
+        async with bluez.pairing_agent(address):
+            await client.pair()
+
     descriptor = find_bosch_security_descriptor(client.services)
     try:
         await client.write_gatt_descriptor(descriptor.handle, b"\x00\x00")
@@ -68,7 +72,7 @@ async def stage_bosch_security(client: BleakClient, address: str) -> None:
             state = bluez.read_device_state(address)
             if state.paired is True:
                 return
-            await client.pair()
+            await pair_with_agent()
             state = await bluez.wait_for_state(
                 address,
                 paired=True,
@@ -81,7 +85,7 @@ async def stage_bosch_security(client: BleakClient, address: str) -> None:
         if "insufficient encryption" not in message and "authentication" not in message:
             raise
 
-    await client.pair()
+    await pair_with_agent()
     state = await bluez.wait_for_state(
         address,
         paired=True,
