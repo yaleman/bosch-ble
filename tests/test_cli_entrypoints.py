@@ -787,9 +787,10 @@ def test_log_chars_main_uses_dump_gatt_client_target_for_state(
         )
         with patch.object(log_chars.live.dump_gatt, "prepare_connection", new=AsyncMock(return_value=state)):
             with patch.object(log_chars.live.dump_gatt, "client_target_for_state", return_value=target):
-                with patch.object(log_chars.live, "BleakClient", FakeClient):
-                    with patch.object(log_chars.asyncio, "sleep", side_effect=fake_sleep):
-                        await log_chars.main("AA:BB", str(tmp_path / "ble_log.txt"))
+                with patch.object(log_chars.live.dump_gatt, "stage_bosch_security", new=AsyncMock()):
+                    with patch.object(log_chars.live, "BleakClient", FakeClient):
+                        with patch.object(log_chars.asyncio, "sleep", side_effect=fake_sleep):
+                            await log_chars.main("AA:BB", str(tmp_path / "ble_log.txt"))
 
     asyncio.run(run())
     assert targets == [target]
@@ -884,11 +885,12 @@ def test_probe_main_uses_dump_gatt_target_and_logs_probe_results(
         )
         with patch.object(probe.live.dump_gatt, "prepare_connection", new=AsyncMock(return_value=state)):
             with patch.object(probe.live.dump_gatt, "client_target_for_state", return_value=target):
-                with patch.object(probe.live, "BleakClient", FakeClient):
-                    with patch.object(probe.asyncio, "sleep", side_effect=fake_sleep):
-                        with patch.object(probe, "PROBE_TARGET_UUIDS", ("00000012-eaa2-11e9-81b4-2a2ae2dbcce4",)):
-                            with patch.object(probe, "PROBE_PAYLOADS", (b"\x01",)):
-                                await probe.main("AA:BB", str(tmp_path / "probe.log"))
+                with patch.object(probe.live.dump_gatt, "stage_bosch_security", new=AsyncMock()):
+                    with patch.object(probe.live, "BleakClient", FakeClient):
+                        with patch.object(probe.asyncio, "sleep", side_effect=fake_sleep):
+                            with patch.object(probe, "PROBE_TARGET_UUIDS", ("00000012-eaa2-11e9-81b4-2a2ae2dbcce4",)):
+                                with patch.object(probe, "PROBE_PAYLOADS", (b"\x01",)):
+                                    await probe.main("AA:BB", str(tmp_path / "probe.log"))
 
     asyncio.run(run())
     assert targets == [target]

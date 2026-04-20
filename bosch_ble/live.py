@@ -92,6 +92,11 @@ async def connected_client(address: str, timeout: float = 20.0):
             async with BleakClient(target, timeout=timeout) as client:
                 if not client.is_connected:
                     raise RuntimeError("Failed to connect")
+                try:
+                    await dump_gatt.stage_bosch_security(client, address)
+                except RuntimeError as exc:
+                    if str(exc) != "Bosch security descriptor was not found.":
+                        raise
                 yield client
                 return
         except Exception as exc:

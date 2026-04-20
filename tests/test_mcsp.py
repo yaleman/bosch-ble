@@ -151,8 +151,13 @@ def test_handshake_main_replies_on_mcsp_transport(
         )
         with patch.object(handshake.live.dump_gatt, "prepare_connection", new=AsyncMock(return_value=state)):
             with patch.object(handshake.live.dump_gatt, "client_target_for_state", return_value=target):
-                with patch.object(handshake.live, "BleakClient", FakeClient):
-                    await handshake.main("AA:BB", str(tmp_path / "handshake.log"))
+                with patch.object(
+                    handshake.live.dump_gatt,
+                    "stage_bosch_security",
+                    new=AsyncMock(),
+                ):
+                    with patch.object(handshake.live, "BleakClient", FakeClient):
+                        await handshake.main("AA:BB", str(tmp_path / "handshake.log"))
 
     asyncio.run(run())
 
@@ -212,12 +217,58 @@ def test_connected_client_retries_transient_service_discovery_disconnect() -> No
         )
         with patch.object(live.dump_gatt, "prepare_connection", new=AsyncMock(return_value=state)):
             with patch.object(live.dump_gatt, "client_target_for_state", return_value=target):
-                with patch.object(live, "BleakClient", FakeClient):
-                    async with live.connected_client("AA:BB", timeout=20.0) as client:
-                        assert client is not None
+                with patch.object(live.dump_gatt, "stage_bosch_security", new=AsyncMock()):
+                    with patch.object(live, "BleakClient", FakeClient):
+                        async with live.connected_client("AA:BB", timeout=20.0) as client:
+                            assert client is not None
 
     asyncio.run(run())
     assert targets == [target, target]
+
+
+def test_connected_client_stages_bosch_security() -> None:
+    target = object()
+    staged: list[tuple[object, str]] = []
+
+    class FakeClient:
+        def __init__(self, address_or_ble_device, timeout: float = 20.0) -> None:
+            self.address_or_ble_device = address_or_ble_device
+            self.timeout = timeout
+            self.is_connected = True
+            self.services = []
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb) -> None:
+            return None
+
+    async def fake_stage(client, address: str) -> None:
+        staged.append((client, address))
+
+    async def run() -> None:
+        state = bluez.BluezState(
+            address="AA:BB",
+            visible=False,
+            device=None,
+            name="sensor",
+            paired=False,
+            trusted=False,
+            connected=True,
+            services_resolved=True,
+            bluetoothctl=CompletedProcess(["bluetoothctl"], 0, stdout="", stderr=""),
+            busctl=CompletedProcess(["busctl"], 0, stdout="", stderr=""),
+        )
+        with patch.object(live.dump_gatt, "prepare_connection", new=AsyncMock(return_value=state)):
+            with patch.object(live.dump_gatt, "client_target_for_state", return_value=target):
+                with patch.object(live.dump_gatt, "stage_bosch_security", new=fake_stage):
+                    with patch.object(live, "BleakClient", FakeClient):
+                        async with live.connected_client("AA:BB", timeout=20.0) as client:
+                            assert client is not None
+
+    asyncio.run(run())
+    assert len(staged) == 1
+    assert staged[0][1] == "AA:BB"
 
 
 def test_handshake_main_logs_non_command_frames_after_handshake(
