@@ -662,6 +662,54 @@ def test_dump_gatt_main_retries_when_service_discovery_disconnects(
     assert "Connecting to AA:BB ..." in output
 
 
+def test_prepare_connection_accepts_connected_state_when_services_do_not_resolve() -> None:
+    async def run() -> None:
+        preflight_state = bluez.BluezState(
+            address="AA:BB",
+            visible=True,
+            device=object(),
+            name="sensor",
+            paired=True,
+            trusted=True,
+            connected=False,
+            services_resolved=False,
+            bluetoothctl=CompletedProcess(["bluetoothctl"], 0, stdout="", stderr=""),
+            busctl=CompletedProcess(["busctl"], 0, stdout="", stderr=""),
+        )
+        connected_state = bluez.BluezState(
+            address="AA:BB",
+            visible=True,
+            device=object(),
+            name="sensor",
+            paired=True,
+            trusted=True,
+            connected=True,
+            services_resolved=False,
+            bluetoothctl=CompletedProcess(["bluetoothctl"], 0, stdout="", stderr=""),
+            busctl=CompletedProcess(["busctl"], 0, stdout="", stderr=""),
+        )
+        with patch.object(dump_gatt, "resolve_device", new=AsyncMock(return_value=preflight_state)):
+            with patch.object(dump_gatt.bluez, "assist_connection", new=AsyncMock(return_value=connected_state)):
+                with patch.object(dump_gatt.bluez, "busctl_available", return_value=True):
+                    with patch.object(
+                        dump_gatt.bluez,
+                        "wait_for_services",
+                        new=AsyncMock(
+                            side_effect=RuntimeError(
+                                "BlueZ connected to AA:BB but services did not resolve."
+                            )
+                        ),
+                    ):
+                        with patch.object(dump_gatt.bluez, "read_device_state", return_value=connected_state):
+                            state = await dump_gatt.prepare_connection("AA:BB")
+
+        assert state.address == "AA:BB"
+        assert state.connected is True
+        assert state.services_resolved is False
+
+    asyncio.run(run())
+
+
 def test_log_chars_main_uses_dump_gatt_client_target_for_state(
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
@@ -939,8 +987,9 @@ def test_dump_gatt_main_fails_cleanly_when_services_never_resolve() -> None:
                         "wait_for_services",
                         new=AsyncMock(side_effect=RuntimeError("BlueZ connected to AA:BB but services did not resolve.")),
                     ):
-                        with pytest.raises(RuntimeError) as excinfo:
-                            await dump_gatt.main("AA:BB")
+                        with patch.object(dump_gatt.bluez, "read_device_state", return_value=preflight_state):
+                            with pytest.raises(RuntimeError) as excinfo:
+                                await dump_gatt.main("AA:BB")
 
         assert str(excinfo.value) == "BlueZ connected to AA:BB but services did not resolve."
 
