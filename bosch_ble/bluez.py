@@ -439,6 +439,14 @@ async def assist_connection(address: str, verbose: bool = False) -> BluezState:
                 result = await run_command_async(argv)
             if verbose:
                 print_section(title, result)
+            if argv[:2] == ["bluetoothctl", "pair"] and result.returncode != 0:
+                state = await asyncio.to_thread(read_device_state, address)
+                if state.paired is not True:
+                    raise RuntimeError(f"BlueZ pair failed for {address}: {summarize_failure(result)}")
+            if argv[:2] == ["bluetoothctl", "trust"] and result.returncode != 0:
+                state = await asyncio.to_thread(read_device_state, address)
+                if state.trusted is not True:
+                    raise RuntimeError(f"BlueZ trust failed for {address}: {summarize_failure(result)}")
             if argv[:2] == ["bluetoothctl", "connect"]:
                 connect_result = result
 

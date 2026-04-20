@@ -476,6 +476,50 @@ def test_assist_connection_skips_pair_and_trust_when_device_is_already_bonded() 
     ]
 
 
+def test_assist_connection_fails_when_pair_fails_and_device_remains_unpaired() -> None:
+    info_result = CompletedProcess(
+        ["bluetoothctl", "info", "AA:BB"],
+        0,
+        stdout="Paired: no\nTrusted: no\nConnected: no\n",
+        stderr="",
+    )
+    pair_result = CompletedProcess(
+        ["bluetoothctl", "pair", "AA:BB"],
+        1,
+        stdout="",
+        stderr="Failed to pair: org.bluez.Error.AuthenticationCanceled\n",
+    )
+    unpaired_state = bluez.BluezState(
+        address="AA:BB",
+        visible=True,
+        device=None,
+        name="sensor",
+        paired=False,
+        trusted=False,
+        connected=False,
+        services_resolved=None,
+        bluetoothctl=CompletedProcess(["bluetoothctl"], 0, stdout="Paired: no\n", stderr=""),
+        busctl=None,
+    )
+
+    @asynccontextmanager
+    async def fake_pairing_agent(_address: str):
+        yield
+
+    async def run() -> None:
+        with patch.object(
+            bluez,
+            "run_command_async",
+            side_effect=[info_result, pair_result],
+        ):
+            with patch.object(bluez, "pairing_agent", side_effect=fake_pairing_agent):
+                with patch.object(bluez, "read_device_state", return_value=unpaired_state):
+                    with pytest.raises(RuntimeError, match="BlueZ pair failed for AA:BB"):
+                        await bluez.assist_connection("AA:BB")
+
+    asyncio.run(run())
+
+
 def test_dump_gatt_main_runs_preflight_and_assisted_connect_before_bleak_client(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
