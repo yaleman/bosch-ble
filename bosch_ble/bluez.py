@@ -506,11 +506,17 @@ async def bluez_set_trusted(address: str, trusted: bool = True) -> subprocess.Co
     return subprocess.CompletedProcess(["bluez", "trust", address], 0, stdout="", stderr="")
 
 
+async def bluez_set_pairable(pairable: bool = True) -> subprocess.CompletedProcess[str]:
+    value = "on" if pairable else "off"
+    return await run_command_async(["bluetoothctl", "pairable", value])
+
+
 async def assist_connection(address: str, verbose: bool = False) -> BluezState:
     info_result = await run_command_async(["bluetoothctl", "info", address])
     info_state = build_state(address, info_result, None)
     steps = [("bluetoothctl info", ["bluetoothctl", "info", address], info_result)]
     if info_state.paired is not True:
+        steps.append(("bluetoothctl pairable on", ["bluetoothctl", "pairable", "on"], None))
         steps.append(("bluez pair", ["bluez", "pair", address], None))
     if info_state.trusted is not True:
         steps.append(("bluez trust", ["bluez", "trust", address], None))
@@ -524,6 +530,8 @@ async def assist_connection(address: str, verbose: bool = False) -> BluezState:
                     result = await bluez_pair_device(address)
                 elif argv[:2] == ["bluez", "trust"]:
                     result = await bluez_set_trusted(address)
+                elif argv[:3] == ["bluetoothctl", "pairable", "on"]:
+                    result = await bluez_set_pairable(True)
                 else:
                     result = await run_command_async(argv)
             if verbose:
