@@ -19,6 +19,10 @@
 - Use package managers for dependency changes.
 - If JavaScript tooling appears, prefer `pnpm`.
 - The remote dev box worktree may be overwritten freely when needed; do not preserve or tiptoe around remote-only changes there.
+- The bike often turns off or stops advertising between attempts.
+- Before diagnosing protocol or pairing failures, confirm the bike is awake and visible to BlueZ.
+- Treat `Visible: no`, scan misses, and `Device ... not available` as bike-state failures first.
+- Only use runs with confirmed advertisement visibility as evidence for pairing or protocol conclusions.
 - When you finish a request, commit and push the changes.
 
 ## Output Guidance
