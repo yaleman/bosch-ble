@@ -292,6 +292,20 @@ def test_build_startup_response_packets_answers_visualizable_issue_types() -> No
     assert [packet.hex() for packet in packets] == ["300d409da150110800080108020803"]
 
 
+def test_build_startup_response_packets_answers_unsubscribes() -> None:
+    packets = handshake.build_startup_response_packets(
+        messagebus=mcsp.encode_frame(
+            mcsp.Frame(
+                end_of_channel=True,
+                channel=mcsp.McspChannel.CHANNEL1,
+                payload=bytes.fromhex("2002c08184"),
+            )
+        )
+    )
+
+    assert [packet.hex() for packet in packets] == ["30054081a00294"]
+
+
 def test_build_startup_response_packets_answers_update_issue_visualization_rpc() -> None:
     packets = handshake.build_startup_response_packets(
         messagebus=mcsp.encode_frame(

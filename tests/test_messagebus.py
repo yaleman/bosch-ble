@@ -62,6 +62,17 @@ def test_decode_directed_frame_parses_mobile_app_subscribe() -> None:
     assert frame.target_name == "USER_INFO"
 
 
+def test_decode_directed_frame_parses_mobile_app_unsubscribe() -> None:
+    frame = messagebus.decode_directed_frame(bytes.fromhex("2002c08184"))
+
+    assert frame.source == 0x2002
+    assert frame.destination == 0x4081
+    assert frame.message_type is messagebus.MessageType.UNSUBSCRIBE
+    assert frame.sequence == 4
+    assert frame.payload == b""
+    assert frame.target_name == "UI_PRIORITY"
+
+
 def test_decode_message_frame_parses_notify() -> None:
     frame = messagebus.decode_message_frame("80bc084d")
 
@@ -125,6 +136,14 @@ def test_encode_rpc_response_matches_empty_success_wire_shape() -> None:
     encoded = messagebus.encode_rpc_response(request)
 
     assert encoded.hex() == "409ca15051"
+
+
+def test_encode_unsubscribe_response_matches_wire_shape() -> None:
+    request = messagebus.decode_directed_frame("2002c08184")
+
+    encoded = messagebus.encode_unsubscribe_response(request)
+
+    assert encoded.hex() == "4081a00294"
 
 
 def test_validate_handshake_log_accepts_known_startup_burst() -> None:

@@ -267,5 +267,18 @@ def encode_subscribe_response(
     )
 
 
+def encode_unsubscribe_response(
+    request: DirectedFrame,
+    payload: bytes = b"",
+    status_code: ResponseStatusCode = ResponseStatusCode.SUCCESS,
+) -> bytes:
+    return _encode_response(
+        request,
+        MessageType.UNSUBSCRIBE_RESPONSE,
+        payload=payload,
+        status_code=status_code,
+    )
+
+
 def encode_notify(source: int, payload: bytes) -> bytes:
     return _encode_address(source, set_msb=True) + payload

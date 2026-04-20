@@ -265,29 +265,50 @@ def list_busy_bluetooth_processes(current_pid: int | None = None) -> list[str]:
     if current_pid is None:
         current_pid = os.getpid()
 
-    result = run_command(["ps", "-eo", "pid=,args="])
+    result = run_command(["ps", "-eo", "pid=,ppid=,args="])
     if result.returncode != 0:
         return []
 
-    busy: list[str] = []
+    process_rows: dict[int, tuple[int | None, str, str]] = {}
     for raw_line in result.stdout.splitlines():
         line = raw_line.strip()
         if not line:
             continue
-        parts = line.split(None, 1)
-        if len(parts) != 2:
+        parts = line.split(None, 2)
+        if len(parts) < 2:
             continue
         try:
             pid = int(parts[0])
         except ValueError:
             continue
-        args = parts[1]
-        if pid == current_pid:
+        ppid: int | None = None
+        args_index = 1
+        if len(parts) == 3:
+            try:
+                ppid = int(parts[1])
+                args_index = 2
+            except ValueError:
+                ppid = None
+        if args_index == 1:
+            args = " ".join(parts[1:])
+        else:
+            args = parts[args_index]
+        process_rows[pid] = (ppid, args, f"{pid} {args}")
+
+    ignored_pids = {current_pid}
+    parent_pid = process_rows.get(current_pid, (os.getppid(), "", ""))[0]
+    while parent_pid is not None and parent_pid > 1 and parent_pid not in ignored_pids:
+        ignored_pids.add(parent_pid)
+        parent_pid = process_rows.get(parent_pid, (None, "", ""))[0]
+
+    busy: list[str] = []
+    for pid, (_ppid, args, display_line) in process_rows.items():
+        if pid in ignored_pids:
             continue
         if args.startswith("ssh "):
             continue
         if any(pattern in args for pattern in BUSY_PROCESS_PATTERNS):
-            busy.append(line)
+            busy.append(display_line)
     return busy
 
 

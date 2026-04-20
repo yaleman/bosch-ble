@@ -1487,6 +1487,25 @@ def test_list_busy_bluetooth_processes_ignores_remote_ssh_wrappers() -> None:
     assert busy == ["101 uv run bosch-ble-dashboard AA:BB"]
 
 
+def test_list_busy_bluetooth_processes_ignores_current_parent_chain() -> None:
+    process_table = CompletedProcess(
+        ["ps"],
+        0,
+        stdout=(
+            "200 1 timeout 20s env PYTHONUNBUFFERED=1 uv run bosch-ble-handshake AA:BB\n"
+            "201 200 uv run bosch-ble-handshake AA:BB\n"
+            "202 201 /usr/bin/python bosch-ble-handshake AA:BB\n"
+            "203 1 sudo btmon\n"
+        ),
+        stderr="",
+    )
+
+    with patch.object(bluez, "run_command", return_value=process_table):
+        busy = bluez.list_busy_bluetooth_processes(current_pid=202)
+
+    assert busy == ["203 sudo btmon"]
+
+
 def test_assert_controller_ready_fails_when_discovering_or_busy() -> None:
     with pytest.raises(RuntimeError) as excinfo:
         bluez.assert_controller_ready(

@@ -123,6 +123,16 @@ def build_startup_response_packets(messagebus: bytes) -> list[bytes]:
         else:
             responses.append(messagebus_mod.encode_subscribe_response(decoded))
             responses.append(messagebus_mod.encode_notify(decoded.destination, payload))
+    elif decoded.message_type is messagebus_mod.MessageType.UNSUBSCRIBE:
+        if payload is None:
+            responses.append(
+                messagebus_mod.encode_unsubscribe_response(
+                    decoded,
+                    status_code=messagebus_mod.ResponseStatusCode.UNSUPPORTED,
+                )
+            )
+        else:
+            responses.append(messagebus_mod.encode_unsubscribe_response(decoded))
     elif decoded.message_type is messagebus_mod.MessageType.WRITE:
         if (
             decoded.destination in STARTUP_WRITE_ADDRESSES
