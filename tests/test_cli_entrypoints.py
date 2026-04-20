@@ -238,6 +238,81 @@ def test_stage_bosch_security_skips_cccd_write_when_device_is_already_paired() -
     assert events == [("write_gatt_descriptor", 0x001F, b"\x00\x00")]
 
 
+def test_stage_bosch_security_pairs_when_direct_cccd_write_is_blocked_on_unpaired_device() -> None:
+    events: list[tuple[str, object]] = []
+    descriptor = FakeDescriptor(0x001F, "00002902-0000-1000-8000-00805f9b34fb")
+    service = FakeServiceWithCharacteristics(
+        "00000010-eaa2-11e9-81b4-2a2ae2dbcce4",
+        [
+            FakeCharacteristicWithDescriptors(
+                "00000011-eaa2-11e9-81b4-2a2ae2dbcce4",
+                ["notify"],
+                [descriptor],
+            )
+        ],
+    )
+
+    class FakeClient:
+        def __init__(self) -> None:
+            self.services = [service]
+            self.is_connected = True
+
+        async def write_gatt_descriptor(self, handle: int, data: bytes) -> None:
+            events.append(("write_gatt_descriptor", handle, data))
+            raise RuntimeError(
+                "Cannot write to CCCD (0x2902) directly. Use start_notify() or stop_notify() instead."
+            )
+
+        async def pair(self) -> None:
+            events.append(("pair", "called"))
+
+    async def run() -> None:
+        initial_state = bluez.BluezState(
+            address="AA:BB",
+            visible=False,
+            device=None,
+            name="sensor",
+            paired=False,
+            trusted=False,
+            connected=True,
+            services_resolved=False,
+            bluetoothctl=CompletedProcess(["bluetoothctl"], 0, stdout="", stderr=""),
+            busctl=CompletedProcess(["busctl"], 0, stdout="", stderr=""),
+        )
+        paired_state = bluez.BluezState(
+            address="AA:BB",
+            visible=False,
+            device=None,
+            name="sensor",
+            paired=True,
+            trusted=True,
+            connected=True,
+            services_resolved=True,
+            bluetoothctl=CompletedProcess(["bluetoothctl"], 0, stdout="", stderr=""),
+            busctl=CompletedProcess(["busctl"], 0, stdout="", stderr=""),
+        )
+        with patch.object(dump_gatt.bluez, "read_device_state", return_value=initial_state):
+            with patch.object(
+                dump_gatt.bluez,
+                "wait_for_state",
+                new=AsyncMock(return_value=paired_state),
+            ) as wait_for_state:
+                await dump_gatt.stage_bosch_security(FakeClient(), "AA:BB")
+
+        wait_for_state.assert_awaited_once_with(
+            "AA:BB",
+            paired=True,
+            connected=True,
+            services_resolved=True,
+        )
+
+    asyncio.run(run())
+    assert events == [
+        ("write_gatt_descriptor", 0x001F, b"\x00\x00"),
+        ("pair", "called"),
+    ]
+
+
 def test_assist_connection_accepts_connected_state_after_local_abort() -> None:
     info_result = CompletedProcess(["bluetoothctl", "info", "AA:BB"], 0, stdout="", stderr="")
     pair_result = CompletedProcess(["bluetoothctl", "pair", "AA:BB"], 0, stdout="", stderr="")

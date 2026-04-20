@@ -68,6 +68,16 @@ async def stage_bosch_security(client: BleakClient, address: str) -> None:
             state = bluez.read_device_state(address)
             if state.paired is True:
                 return
+            await client.pair()
+            state = await bluez.wait_for_state(
+                address,
+                paired=True,
+                connected=True,
+                services_resolved=True,
+            )
+            if state.connected is not True or not client.is_connected:
+                raise RuntimeError(f"Security transition disconnected for {address}.")
+            return
         if "insufficient encryption" not in message and "authentication" not in message:
             raise
 
