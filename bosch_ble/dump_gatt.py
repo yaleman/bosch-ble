@@ -64,6 +64,10 @@ async def stage_bosch_security(client: BleakClient, address: str) -> None:
         return
     except Exception as exc:
         message = str(exc).lower()
+        if "cannot write to cccd (0x2902) directly" in message:
+            state = bluez.read_device_state(address)
+            if state.paired is True:
+                return
         if "insufficient encryption" not in message and "authentication" not in message:
             raise
 
