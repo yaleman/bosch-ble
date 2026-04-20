@@ -1,0 +1,128 @@
+from __future__ import annotations
+
+from pathlib import Path
+
+import pytest
+
+from bosch_ble import messagebus, validate_live
+
+
+def test_decode_directed_frame_parses_startup_stage_write() -> None:
+    frame = messagebus.decode_directed_frame(bytes.fromhex("2030c0a9210809"))
+
+    assert frame.source == 0x2030
+    assert frame.destination == 0x40A9
+    assert frame.message_type is messagebus.MessageType.WRITE
+    assert frame.sequence == 1
+    assert frame.payload == bytes.fromhex("0809")
+    assert frame.target_name == "STARTUP_STAGE"
+
+
+def test_decode_directed_frame_parses_feature_properties_read() -> None:
+    frame = messagebus.decode_directed_frame(bytes.fromhex("2150c09f01"))
+
+    assert frame.source == 0x2150
+    assert frame.destination == 0x409F
+    assert frame.message_type is messagebus.MessageType.READ
+    assert frame.sequence == 1
+    assert frame.payload == b""
+    assert frame.target_name == "MOBILE_APP_FEATURE_PROPERTIES_RELEASE4"
+
+
+def test_decode_directed_frame_parses_mobile_app_subscribe() -> None:
+    frame = messagebus.decode_directed_frame(bytes.fromhex("2002c0a460"))
+
+    assert frame.source == 0x2002
+    assert frame.destination == 0x40A4
+    assert frame.message_type is messagebus.MessageType.SUBSCRIBE
+    assert frame.sequence == 0
+    assert frame.payload == b""
+    assert frame.target_name == "USER_INFO"
+
+
+def test_validate_handshake_log_accepts_known_startup_burst() -> None:
+    log_text = """\
+2026-04-20T15:09:14 RECV command=VersionCommand(version=3)
+2026-04-20T15:09:14 RECV command=MaxSegmentationPacketCommand(max_packet_size=244)
+2026-04-20T15:09:14 RECV command=AdvanceTransmitWindowCommand(channel=<McspChannel.CHANNEL1: 1>, advance=2048)
+2026-04-20T15:09:14 RECV command=AdvanceTransmitWindowCommand(channel=<McspChannel.CHANNEL2: 2>, advance=8192)
+2026-04-20T15:09:14 RECV command=AdvanceTransmitWindowCommand(channel=<McspChannel.CHANNEL3: 3>, advance=8192)
+2026-04-20T15:09:14 RECV command=AdvanceTransmitWindowCommand(channel=<McspChannel.CHANNEL4: 4>, advance=0)
+2026-04-20T15:09:14 RECV command=AdvanceTransmitWindowCommand(channel=<McspChannel.CHANNEL5: 5>, advance=0)
+2026-04-20T15:09:14 RECV command=AdvanceTransmitWindowCommand(channel=<McspChannel.CHANNEL6: 6>, advance=0)
+2026-04-20T15:09:14 RECV command=AdvanceTransmitWindowCommand(channel=<McspChannel.CHANNEL7: 7>, advance=0)
+2026-04-20T15:09:14 SEND hex=10020103
+2026-04-20T15:09:14 SEND hex=10030400f4
+2026-04-20T15:09:14 SEND hex=10020301
+2026-04-20T15:09:14 SEND hex=10020302
+2026-04-20T15:09:14 SEND hex=10020303
+2026-04-20T15:09:14 SEND hex=10020304
+2026-04-20T15:09:14 SEND hex=10020305
+2026-04-20T15:09:14 SEND hex=10020306
+2026-04-20T15:09:14 SEND hex=10020307
+2026-04-20T15:09:14 FRAME channel=CHANNEL1 end=True hex=2030c0a9210809
+2026-04-20T15:09:14 FRAME channel=CHANNEL1 end=True hex=2150c09f01
+2026-04-20T15:09:14 FRAME channel=CHANNEL1 end=True hex=2002c08161
+2026-04-20T15:09:14 FRAME channel=CHANNEL1 end=True hex=2002c08561
+2026-04-20T15:09:14 FRAME channel=CHANNEL1 end=True hex=2002c0a861
+2026-04-20T15:09:14 FRAME channel=CHANNEL1 end=True hex=2100c09501
+2026-04-20T15:09:14 FRAME channel=CHANNEL1 end=True hex=2002c09560
+2026-04-20T15:09:14 FRAME channel=CHANNEL1 end=True hex=2002c09460
+2026-04-20T15:09:14 FRAME channel=CHANNEL1 end=True hex=2100c09f01
+2026-04-20T15:09:14 FRAME channel=CHANNEL1 end=True hex=2002c08260
+2026-04-20T15:09:14 FRAME channel=CHANNEL1 end=True hex=2002c08660
+2026-04-20T15:09:14 FRAME channel=CHANNEL1 end=True hex=2002c08760
+2026-04-20T15:09:14 FRAME channel=CHANNEL1 end=True hex=2002c08860
+2026-04-20T15:09:14 FRAME channel=CHANNEL1 end=True hex=2002c08960
+2026-04-20T15:09:14 FRAME channel=CHANNEL1 end=True hex=2002c09660
+2026-04-20T15:09:14 FRAME channel=CHANNEL1 end=True hex=2002c09760
+2026-04-20T15:09:14 FRAME channel=CHANNEL1 end=True hex=2002c09860
+2026-04-20T15:09:14 FRAME channel=CHANNEL1 end=True hex=2002c09960
+2026-04-20T15:09:14 FRAME channel=CHANNEL1 end=True hex=2002c09a60
+2026-04-20T15:09:14 FRAME channel=CHANNEL1 end=True hex=2002c0a260
+2026-04-20T15:09:14 FRAME channel=CHANNEL1 end=True hex=2002c0a360
+2026-04-20T15:09:14 FRAME channel=CHANNEL1 end=True hex=2002c0a460
+2026-04-20T15:09:14 FRAME channel=CHANNEL1 end=True hex=2010c08101
+2026-04-20T15:09:14 FRAME channel=CHANNEL1 end=True hex=2100c09f02
+2026-04-20T15:09:14 FRAME channel=CHANNEL1 end=True hex=2150c09f02
+2026-04-20T15:09:14 FRAME channel=CHANNEL1 end=True hex=2030c0a9220809
+2026-04-20T15:09:15 FRAME channel=CHANNEL1 end=True hex=2010c08102
+2026-04-20T15:09:15 FRAME channel=CHANNEL1 end=True hex=2150c09f03
+"""
+
+    result = validate_live.validate_handshake_log(log_text)
+
+    assert result.passed is True
+    assert result.missing == []
+    assert result.missing_mcsp == []
+    assert result.missing_send == []
+    assert result.decoded["2030c0a9210809"].target_name == "STARTUP_STAGE"
+    assert result.decoded["2150c09f01"].target_name == "MOBILE_APP_FEATURE_PROPERTIES_RELEASE4"
+    assert result.decoded["2002c0a460"].target_name == "USER_INFO"
+
+
+def test_validate_handshake_log_reports_missing_expectations() -> None:
+    result = validate_live.validate_handshake_log("2026-04-20T15:09:14 SEND hex=10020103\n")
+
+    assert result.passed is False
+    assert "2030c0a9210809" in result.missing
+    assert "VersionCommand(version=3)" in result.missing_mcsp
+    assert "10030400f4" in result.missing_send
+
+
+def test_validate_live_cli_reads_log_file_and_prints_summary(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    log_path = tmp_path / "handshake.log"
+    log_path.write_text(
+        "2026-04-20T15:09:14 RECV command=VersionCommand(version=3)\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(SystemExit) as excinfo:
+        validate_live.cli(["bosch-ble-validate-live", str(log_path)])
+
+    assert excinfo.value.code == 1
+    captured = capsys.readouterr()
+    assert "Validation failed" in captured.err

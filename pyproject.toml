@@ -23,6 +23,7 @@ bosch-ble-handshake = "bosch_ble.handshake:cli"
 bosch-ble-log-chars = "bosch_ble.log_chars:cli"
 bosch-ble-probe = "bosch_ble.probe:cli"
 bosch-ble-scan = "bosch_ble.scan:cli"
+bosch-ble-validate-live = "bosch_ble.validate_live:cli"
 
 [build-system]
 requires = ["hatchling"]
