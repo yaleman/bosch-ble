@@ -1,17 +1,18 @@
 # Pairing Blocker Summary
 
 ## Summary
-Bosch transport work has moved forward substantially, but first-time pairing on `m710qa.local` is still blocked. The main complication is that the bike frequently turns off or stops advertising between attempts, so many failures are invalid as protocol evidence. At least one traced run was still a real pairing failure with the bike awake, visible, and briefly connected, so this is not only a power-state problem. The current best explanation is a host-side SMP pairing mismatch on the Linux adapter/controller, with higher-level Bosch protocol work blocked behind that.
+Bosch transport work has moved forward substantially, but repeatable first-time pairing from the current Linux tooling on `m710qa.local` is still unreliable. The main complication is that the bike frequently turns off or stops advertising between attempts, so many failures are invalid as protocol evidence. Manual pairing has been observed on the host and the bike has shown the machine in its configuration UI, so pairing is not impossible in principle. At least one traced run was still a real pairing failure with the bike awake, visible, and briefly connected, so this is not only a power-state problem. The current best explanation is a host-side SMP pairing mismatch on the Linux adapter/controller, with higher-level Bosch protocol work blocked behind that.
 
 ## What Works
 - Discovery works when the bike is awake and advertising as `smart system eBike`.
+- Pairing has been observed manually at least once, so the host and bike are not fundamentally incompatible.
 - The Python path now gets through preflight, BlueZ-assisted connection setup, and Bosch MCSP startup work more reliably than earlier revisions.
 - MCSP and MessageBus startup handling are implemented far enough to compare live Linux behavior against the phone capture.
 - `tmux` plus `btmon` is now a reliable way to capture a full pairing attempt without losing the TTY-backed session.
 - The Python pairing path now sends `KeyboardDisplay` with `Bonding, MITM, SC, CT2`, which is much closer to the phone than plain `bluetoothctl pair`.
 
 ## What Fails Right Now
-- First-time bond on `m710qa.local` still fails with `org.bluez.Error.AuthenticationCanceled`.
+- Repeatable first-time bond attempts from the current Linux tooling still often fail with `org.bluez.Error.AuthenticationCanceled`.
 - Some runs fail earlier because the bike is simply not advertising, which makes them inconclusive for protocol debugging.
 - The bike can connect briefly and still reject the pairing request before any secure session is established.
 - Dashboard and higher-level Bosch protocol validation remain blocked until pairing is stable.
