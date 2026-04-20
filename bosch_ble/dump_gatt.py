@@ -84,6 +84,10 @@ async def stage_bosch_security(client: BleakClient, address: str) -> None:
 
 
 async def resolve_device(address: str) -> bluez.BluezState:
+    discovering = bluez.controller_discovering_state()
+    print(f"ControllerDiscovering: {bluez.format_flag(discovering)}")
+    bluez.assert_controller_ready(address, discovering=discovering)
+
     state = await bluez.preflight_device(address)
     bluez.print_preflight_summary(state)
 

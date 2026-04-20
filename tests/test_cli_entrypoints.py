@@ -1446,3 +1446,88 @@ def test_bluez_connect_cli_exits_nonzero_when_connect_fails(
     output = capsys.readouterr()
     assert output.out == ""
     assert output.err == "Error: BlueZ connect failed for AA:BB: Failed\n"
+
+
+def test_list_busy_bluetooth_processes_filters_current_process() -> None:
+    process_table = CompletedProcess(
+        ["ps"],
+        0,
+        stdout=(
+            "100 /usr/bin/python current-script.py\n"
+            "101 uv run bosch-ble-handshake AA:BB\n"
+            "102 sudo btmon\n"
+            "103 something harmless\n"
+        ),
+        stderr="",
+    )
+
+    with patch.object(bluez, "run_command", return_value=process_table):
+        busy = bluez.list_busy_bluetooth_processes(current_pid=100)
+
+    assert busy == [
+        "101 uv run bosch-ble-handshake AA:BB",
+        "102 sudo btmon",
+    ]
+
+
+def test_list_busy_bluetooth_processes_ignores_remote_ssh_wrappers() -> None:
+    process_table = CompletedProcess(
+        ["ps"],
+        0,
+        stdout=(
+            "100 ssh m710qa.local 'uv run bosch-ble-handshake AA:BB'\n"
+            "101 uv run bosch-ble-dashboard AA:BB\n"
+        ),
+        stderr="",
+    )
+
+    with patch.object(bluez, "run_command", return_value=process_table):
+        busy = bluez.list_busy_bluetooth_processes(current_pid=999)
+
+    assert busy == ["101 uv run bosch-ble-dashboard AA:BB"]
+
+
+def test_assert_controller_ready_fails_when_discovering_or_busy() -> None:
+    with pytest.raises(RuntimeError) as excinfo:
+        bluez.assert_controller_ready(
+            "AA:BB",
+            discovering=True,
+            busy_processes=["101 uv run bosch-ble-handshake AA:BB"],
+        )
+
+    assert str(excinfo.value) == (
+        "Bluetooth controller is busy before connecting to AA:BB: "
+        "controller discovery is already active; "
+        "other Bluetooth tools are still running (101 uv run bosch-ble-handshake AA:BB)"
+    )
+
+
+def test_resolve_device_logs_controller_state_before_scan(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    state = bluez.BluezState(
+        address="AA:BB",
+        visible=True,
+        device=None,
+        name="sensor",
+        paired=False,
+        trusted=False,
+        connected=False,
+        services_resolved=None,
+        bluetoothctl=CompletedProcess(["bluetoothctl"], 0, stdout="", stderr=""),
+        busctl=None,
+    )
+
+    async def run() -> None:
+        with patch.object(dump_gatt.bluez, "controller_discovering_state", return_value=False):
+            with patch.object(dump_gatt.bluez, "assert_controller_ready") as assert_ready:
+                with patch.object(dump_gatt.bluez, "preflight_device", new=AsyncMock(return_value=state)):
+                    result = await dump_gatt.resolve_device("AA:BB")
+
+        assert result is state
+        assert_ready.assert_called_once_with("AA:BB", discovering=False)
+
+    asyncio.run(run())
+
+    output = capsys.readouterr().out
+    assert "ControllerDiscovering: no" in output

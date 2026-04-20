@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import shutil
 import subprocess
 import sys
@@ -28,6 +29,16 @@ BLUEZ_AGENT_CAPABILITY = "DisplayYesNo"
 BLUEZ_AGENT_BASE_PATH = "/org/bosch_ble"
 BLUEZ_REJECTED_ERROR = "org.bluez.Error.Rejected"
 DBusEmpty = Annotated[None, DBusSignature("")]
+BUSY_PROCESS_PATTERNS = (
+    "bosch-ble-handshake",
+    "bosch-ble-dashboard",
+    "bosch-ble-dump-gatt",
+    "bosch-ble-log-chars",
+    "bosch-ble-probe",
+    "btmon",
+    "tshark",
+    "wireshark",
+)
 
 
 @dataclass(slots=True)
@@ -235,6 +246,74 @@ def summarize_failure(result: subprocess.CompletedProcess[str]) -> str:
     if candidates:
         return candidates[0].splitlines()[-1]
     return f"exit code {result.returncode}"
+
+
+def controller_show() -> subprocess.CompletedProcess[str]:
+    try:
+        return run_command(["bluetoothctl", "show"])
+    except FileNotFoundError:
+        return subprocess.CompletedProcess(["bluetoothctl", "show"], 127, stdout="", stderr="")
+
+
+def controller_discovering_state(show_result: subprocess.CompletedProcess[str] | None = None) -> bool | None:
+    if show_result is None:
+        show_result = controller_show()
+    return parse_flag(f"{show_result.stdout}\n{show_result.stderr}", "Discovering")
+
+
+def list_busy_bluetooth_processes(current_pid: int | None = None) -> list[str]:
+    if current_pid is None:
+        current_pid = os.getpid()
+
+    result = run_command(["ps", "-eo", "pid=,args="])
+    if result.returncode != 0:
+        return []
+
+    busy: list[str] = []
+    for raw_line in result.stdout.splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+        parts = line.split(None, 1)
+        if len(parts) != 2:
+            continue
+        try:
+            pid = int(parts[0])
+        except ValueError:
+            continue
+        args = parts[1]
+        if pid == current_pid:
+            continue
+        if args.startswith("ssh "):
+            continue
+        if any(pattern in args for pattern in BUSY_PROCESS_PATTERNS):
+            busy.append(line)
+    return busy
+
+
+def assert_controller_ready(
+    address: str,
+    *,
+    discovering: bool | None = None,
+    busy_processes: list[str] | None = None,
+) -> None:
+    if discovering is None:
+        discovering = controller_discovering_state()
+    if busy_processes is None:
+        busy_processes = list_busy_bluetooth_processes()
+
+    problems: list[str] = []
+    if discovering is True:
+        problems.append("controller discovery is already active")
+    if busy_processes:
+        joined = "; ".join(busy_processes[:3])
+        if len(busy_processes) > 3:
+            joined += "; ..."
+        problems.append(f"other Bluetooth tools are still running ({joined})")
+    if problems:
+        raise RuntimeError(
+            f"Bluetooth controller is busy before connecting to {address}: {'; '.join(problems)}"
+        )
 
 
 class AutoConfirmBluezAgent(ServiceInterface):
