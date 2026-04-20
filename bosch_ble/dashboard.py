@@ -6,11 +6,8 @@ import sys
 from collections import deque
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any
 
-from bleak import BleakClient
-
-from bosch_ble import dump_gatt, handshake, mcsp, messagebus
+from bosch_ble import handshake, live, messagebus
 
 
 REFRESH_SECONDS = 1.0
@@ -77,14 +74,6 @@ def decode_bike_speed(payload: bytes) -> tuple[int | None, bool | None]:
     if validity is None:
         return value, None
     return value, bool(validity)
-
-
-def _format_target(frame: messagebus.DirectedFrame) -> str:
-    return frame.target_name or f"0x{frame.destination:04x}"
-
-
-def _format_source(frame: messagebus.NotifyFrame) -> str:
-    return frame.source_name or f"0x{frame.source:04x}"
 
 
 @dataclass
@@ -169,15 +158,7 @@ class DashboardState:
             self.charger_connected = False
 
     def _summarize_frame(self, frame: messagebus.MessageFrame) -> str:
-        if isinstance(frame, messagebus.NotifyFrame):
-            summary = f"NOTIFY {_format_source(frame)}"
-            if frame.payload:
-                summary += f" payload={frame.payload.hex()}"
-            return summary
-        summary = f"{frame.message_type.name} {_format_target(frame)}"
-        if frame.payload:
-            summary += f" payload={frame.payload.hex()}"
-        return summary
+        return messagebus.format_message_frame(frame)
 
 
 def _format_percent(value: int | None) -> str:
@@ -236,76 +217,27 @@ async def main(address: str) -> None:
     state = DashboardState(connection_status="connecting")
     _print_dashboard(state)
 
-    bluez_state = await dump_gatt.prepare_connection(address)
-    target = dump_gatt.client_target_for_state(bluez_state)
-
-    async with BleakClient(target, timeout=20.0) as client:
+    async with live.connected_client(address, timeout=20.0) as client:
         state.connection_status = "connected" if client.is_connected else "disconnected"
         _print_dashboard(state)
-        if not client.is_connected:
-            raise RuntimeError("Failed to connect")
-
         receive_uuid, send_uuid = handshake.find_mcsp_transport(client.services)
-        handshake_future: asyncio.Future[list[mcsp.Command]] = loop.create_future()
-        background_tasks: set[asyncio.Task[None]] = set()
-        handshake_complete = False
-
-        async def send_packets(packets: list[bytes]) -> None:
-            for packet in packets:
-                await client.write_gatt_char(send_uuid, packet, response=False)
-
-        def schedule_packets(packets: list[bytes]) -> None:
-            if not packets:
-                return
-            task = loop.create_task(send_packets(packets))
-            background_tasks.add(task)
-            task.add_done_callback(background_tasks.discard)
-
-        def notify_handler(sender: Any, data: bytearray) -> None:
-            del sender
-            payload = bytes(data)
-            try:
-                frames = mcsp.split_frames(payload)
-            except Exception as exc:
-                state.recent_frames.append(f"DECODE_FAILED {exc}")
-                _print_dashboard(state)
-                return
-
-            commands: list[mcsp.Command] = []
-            for frame in frames:
-                if frame.channel is mcsp.McspChannel.COMMAND:
-                    try:
-                        command = mcsp.decode_command_frame(frame)
-                    except Exception as exc:
-                        state.recent_frames.append(f"DECODE_FAILED {exc}")
-                        continue
-                    commands.append(command)
-                    continue
-
-                try:
-                    message = messagebus.decode_message_frame(frame.payload)
-                except Exception:
-                    state.recent_frames.append(
-                        f"{frame.channel.name} payload={frame.payload.hex()}"
-                    )
-                    continue
-                if handshake_complete:
-                    schedule_packets(handshake.build_startup_response_packets(mcsp.encode_frame(frame)))
-                state.apply_message(message)
-
-            if not handshake_future.done() and handshake.is_bike_handshake(commands):
-                handshake_future.set_result(commands)
-            _print_dashboard(state)
-
-        await client.start_notify(receive_uuid, notify_handler)
+        session = live.McspLiveSession(
+            client,
+            receive_uuid,
+            send_uuid,
+            startup_responder=lambda frame, decoded: handshake.build_startup_response_packets(
+                frame=frame,
+                decoded=decoded,
+            ),
+            on_message=lambda _frame, decoded: state.apply_message(decoded),
+            on_decode_error=lambda item, exc: state.recent_frames.append(
+                f"DECODE_FAILED {getattr(item, 'channel', 'payload')} {exc}"
+            ),
+        )
+        await session.start()
         try:
-            commands = await asyncio.wait_for(
-                handshake_future,
-                timeout=HANDSHAKE_TIMEOUT_SECONDS,
-            )
-            handshake_complete = True
-            for packet in handshake.build_handshake_response(commands):
-                await client.write_gatt_char(send_uuid, packet, response=False)
+            commands = await session.wait_for_handshake(HANDSHAKE_TIMEOUT_SECONDS)
+            await session.queue_handshake_response(commands)
             while not stop.is_set():
                 _print_dashboard(state)
                 try:
@@ -313,9 +245,7 @@ async def main(address: str) -> None:
                 except TimeoutError:
                     continue
         finally:
-            if background_tasks:
-                await asyncio.gather(*background_tasks, return_exceptions=True)
-            await client.stop_notify(receive_uuid)
+            await session.stop()
             state.connection_status = "disconnected"
             _print_dashboard(state)
 

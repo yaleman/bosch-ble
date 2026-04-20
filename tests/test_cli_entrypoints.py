@@ -714,9 +714,9 @@ def test_log_chars_main_uses_dump_gatt_client_target_for_state(
             bluetoothctl=CompletedProcess(["bluetoothctl"], 0, stdout="", stderr=""),
             busctl=CompletedProcess(["busctl"], 0, stdout="", stderr=""),
         )
-        with patch.object(log_chars.dump_gatt, "prepare_connection", new=AsyncMock(return_value=state)):
-            with patch.object(log_chars.dump_gatt, "client_target_for_state", return_value=target):
-                with patch.object(log_chars, "BleakClient", FakeClient):
+        with patch.object(log_chars.live.dump_gatt, "prepare_connection", new=AsyncMock(return_value=state)):
+            with patch.object(log_chars.live.dump_gatt, "client_target_for_state", return_value=target):
+                with patch.object(log_chars.live, "BleakClient", FakeClient):
                     with patch.object(log_chars.asyncio, "sleep", side_effect=fake_sleep):
                         await log_chars.main("AA:BB", str(tmp_path / "ble_log.txt"))
 
@@ -811,9 +811,9 @@ def test_probe_main_uses_dump_gatt_target_and_logs_probe_results(
             bluetoothctl=CompletedProcess(["bluetoothctl"], 0, stdout="", stderr=""),
             busctl=CompletedProcess(["busctl"], 0, stdout="", stderr=""),
         )
-        with patch.object(probe.dump_gatt, "prepare_connection", new=AsyncMock(return_value=state)):
-            with patch.object(probe.dump_gatt, "client_target_for_state", return_value=target):
-                with patch.object(probe, "BleakClient", FakeClient):
+        with patch.object(probe.live.dump_gatt, "prepare_connection", new=AsyncMock(return_value=state)):
+            with patch.object(probe.live.dump_gatt, "client_target_for_state", return_value=target):
+                with patch.object(probe.live, "BleakClient", FakeClient):
                     with patch.object(probe.asyncio, "sleep", side_effect=fake_sleep):
                         with patch.object(probe, "PROBE_TARGET_UUIDS", ("00000012-eaa2-11e9-81b4-2a2ae2dbcce4",)):
                             with patch.object(probe, "PROBE_PAYLOADS", (b"\x01",)):
@@ -1028,9 +1028,9 @@ def test_log_chars_main_resets_stop_event_between_runs(
         log_chars.STOP.set()
 
     async def run_once() -> None:
-        with patch.object(log_chars, "BleakClient", FakeClient):
+        with patch.object(log_chars.live, "BleakClient", FakeClient):
             with patch.object(
-                log_chars.dump_gatt,
+                log_chars.live.dump_gatt,
                 "prepare_connection",
                 new=AsyncMock(return_value=prepared_state),
             ):
@@ -1092,9 +1092,9 @@ def test_log_chars_main_prepares_connection_before_bleak_client(
         log_chars.STOP.set()
 
     async def run() -> None:
-        with patch.object(log_chars, "BleakClient", FakeClient):
+        with patch.object(log_chars.live, "BleakClient", FakeClient):
             with patch.object(
-                log_chars.dump_gatt,
+                log_chars.live.dump_gatt,
                 "prepare_connection",
                 new=AsyncMock(return_value=prepared_state),
             ) as prepare_connection:
@@ -1455,7 +1455,7 @@ def test_list_busy_bluetooth_processes_filters_current_process() -> None:
         stdout=(
             "100 /usr/bin/python current-script.py\n"
             "101 uv run bosch-ble-handshake AA:BB\n"
-            "102 sudo btmon\n"
+            "102 bluetoothctl scan on\n"
             "103 something harmless\n"
         ),
         stderr="",
@@ -1466,7 +1466,7 @@ def test_list_busy_bluetooth_processes_filters_current_process() -> None:
 
     assert busy == [
         "101 uv run bosch-ble-handshake AA:BB",
-        "102 sudo btmon",
+        "102 bluetoothctl scan on",
     ]
 
 
@@ -1495,7 +1495,7 @@ def test_list_busy_bluetooth_processes_ignores_current_parent_chain() -> None:
             "200 1 timeout 20s env PYTHONUNBUFFERED=1 uv run bosch-ble-handshake AA:BB\n"
             "201 200 uv run bosch-ble-handshake AA:BB\n"
             "202 201 /usr/bin/python bosch-ble-handshake AA:BB\n"
-            "203 1 sudo btmon\n"
+            "203 1 bluetoothctl connect AA:BB\n"
         ),
         stderr="",
     )
@@ -1503,7 +1503,27 @@ def test_list_busy_bluetooth_processes_ignores_current_parent_chain() -> None:
     with patch.object(bluez, "run_command", return_value=process_table):
         busy = bluez.list_busy_bluetooth_processes(current_pid=202)
 
-    assert busy == ["203 sudo btmon"]
+    assert busy == ["203 bluetoothctl connect AA:BB"]
+
+
+def test_list_busy_bluetooth_processes_ignores_passive_capture_viewers() -> None:
+    process_table = CompletedProcess(
+        ["ps"],
+        0,
+        stdout=(
+            "100 /usr/bin/python current-script.py\n"
+            "101 wireshark captures/session.pcapng\n"
+            "102 tshark -r captures/session.pcapng\n"
+            "103 btmon\n"
+            "104 uv run bosch-ble-dashboard AA:BB\n"
+        ),
+        stderr="",
+    )
+
+    with patch.object(bluez, "run_command", return_value=process_table):
+        busy = bluez.list_busy_bluetooth_processes(current_pid=100)
+
+    assert busy == ["104 uv run bosch-ble-dashboard AA:BB"]
 
 
 def test_assert_controller_ready_fails_when_discovering_or_busy() -> None:

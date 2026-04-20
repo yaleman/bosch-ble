@@ -75,7 +75,9 @@ def validate_handshake_log(text: str) -> ValidationResult:
     for match in CHANNEL1_PATTERN.finditer(text):
         frame_hex = match.group(1).lower()
         frame_hexes.add(frame_hex)
-        decoded[frame_hex] = messagebus.decode_directed_frame(frame_hex)
+        frame = messagebus.decode_message_frame(frame_hex)
+        if isinstance(frame, messagebus.DirectedFrame):
+            decoded[frame_hex] = frame
 
     missing = [frame_hex for frame_hex in FRAME_EXPECTATIONS if frame_hex not in frame_hexes]
     for label, options in FRAME_GROUP_EXPECTATIONS.items():

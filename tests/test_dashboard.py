@@ -1,10 +1,12 @@
 from __future__ import annotations
 
-from unittest.mock import patch
+import asyncio
+from subprocess import CompletedProcess
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from bosch_ble import dashboard, messagebus
+from bosch_ble import bluez, dashboard, messagebus
 
 
 def test_dashboard_state_updates_from_known_payloads() -> None:
@@ -106,3 +108,110 @@ def test_dashboard_can_render_unknown_state() -> None:
     assert "Battery    : unknown" in rendered
     assert "Speed      : unknown" in rendered
     assert "Charger    : unknown" in rendered
+
+
+def test_dashboard_main_serializes_startup_responses_after_handshake_packets(
+    tmp_path,
+) -> None:
+    receive_uuid = "00000011-eaa2-11e9-81b4-2a2ae2dbcce4"
+    send_uuid = "00000012-eaa2-11e9-81b4-2a2ae2dbcce4"
+
+    class FakeCharacteristic:
+        def __init__(self, uuid: str, properties: list[str]) -> None:
+            self.uuid = uuid
+            self.properties = properties
+
+    class FakeService:
+        def __init__(self, uuid: str, characteristics: list[FakeCharacteristic]) -> None:
+            self.uuid = uuid
+            self.characteristics = characteristics
+
+    services = [
+        FakeService(
+            "00000010-eaa2-11e9-81b4-2a2ae2dbcce4",
+            [
+                FakeCharacteristic(receive_uuid, ["notify"]),
+                FakeCharacteristic(send_uuid, ["write-without-response"]),
+            ],
+        )
+    ]
+    writes: list[tuple[str, bytes, bool]] = []
+
+    class FakeClient:
+        def __init__(self, address_or_ble_device, timeout: float = 20.0) -> None:
+            self.address_or_ble_device = address_or_ble_device
+            self.timeout = timeout
+            self.is_connected = True
+            self.services = services
+            self._callback = None
+            self._injected = False
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb) -> None:
+            return None
+
+        async def start_notify(self, uuid: str, callback) -> None:
+            self._callback = callback
+            callback(
+                "notify-sender",
+                bytearray.fromhex(
+                    "10020103"
+                    "10030400f4"
+                    "1006020100000800"
+                    "1006020200002000"
+                    "1006020300002000"
+                    "1006020400000000"
+                    "1006020500000000"
+                    "1006020600000000"
+                    "1006020700000000"
+                ),
+            )
+
+        async def stop_notify(self, uuid: str) -> None:
+            return None
+
+        async def write_gatt_char(self, uuid: str, data: bytes, response: bool = False) -> None:
+            writes.append((uuid, data, response))
+            if not self._injected and self._callback is not None:
+                self._injected = True
+                self._callback("notify-sender", bytearray.fromhex("30052002c08161"))
+                await asyncio.sleep(0)
+
+    async def run() -> None:
+        state = bluez.BluezState(
+            address="AA:BB",
+            visible=False,
+            device=None,
+            name="sensor",
+            paired=True,
+            trusted=True,
+            connected=True,
+            services_resolved=True,
+            bluetoothctl=CompletedProcess(["bluetoothctl"], 0, stdout="", stderr=""),
+            busctl=CompletedProcess(["busctl"], 0, stdout="", stderr=""),
+        )
+        with patch.object(dashboard.live.dump_gatt, "prepare_connection", new=AsyncMock(return_value=state)):
+            with patch.object(dashboard.live.dump_gatt, "client_target_for_state", return_value=object()):
+                with patch.object(dashboard.live, "BleakClient", FakeClient):
+                    stop = asyncio.Event()
+                    stop.set()
+                    with patch("bosch_ble.dashboard.asyncio.Event", return_value=stop):
+                        await dashboard.main("AA:BB")
+
+    asyncio.run(run())
+
+    assert [data.hex() for _, data, _ in writes] == [
+        "10020103",
+        "10030400f4",
+        "10020301",
+        "10020302",
+        "10020303",
+        "10020304",
+        "10020305",
+        "10020306",
+        "10020307",
+        "30054081a00271",
+        "3004c0810824",
+    ]

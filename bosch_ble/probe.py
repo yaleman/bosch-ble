@@ -10,7 +10,7 @@ from typing import Any
 
 from bleak import BleakClient
 
-from bosch_ble import dump_gatt
+from bosch_ble import live
 
 
 PROBE_TARGET_UUIDS = (
@@ -103,14 +103,8 @@ async def main(address: str, out_file: str = "ble_probe.txt") -> None:
         except NotImplementedError:
             pass
 
-    state = await dump_gatt.prepare_connection(address)
-    target = dump_gatt.client_target_for_state(state)
-
-    async with BleakClient(target, timeout=20.0) as client:
+    async with live.connected_client(address, timeout=20.0) as client:
         print(f"Connected: {client.is_connected}", flush=True)
-        if not client.is_connected:
-            raise RuntimeError("Failed to connect")
-
         with path.open("a", encoding="utf-8") as fh:
             def emit(line: str) -> None:
                 print(line, flush=True)

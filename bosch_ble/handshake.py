@@ -6,18 +6,12 @@ import signal
 import sys
 from datetime import datetime
 from pathlib import Path
-from typing import Any
 
-from bleak import BleakClient
-
-from bosch_ble import dump_gatt, mcsp, messagebus as messagebus_mod
+from bosch_ble import live, mcsp, messagebus as messagebus_mod
 
 
 HANDSHAKE_TIMEOUT_SECONDS = 10.0
 POST_HANDSHAKE_WAIT_SECONDS = 1.0
-NON_COMMAND_CHANNELS = tuple(
-    channel for channel in mcsp.McspChannel if channel is not mcsp.McspChannel.COMMAND
-)
 STARTUP_WRITE_ADDRESSES = {0x40A9}
 STARTUP_RPC_ADDRESSES = {0x409C}
 
@@ -30,72 +24,26 @@ def format_cli_error(exc: Exception) -> str:
     return str(exc) or type(exc).__name__
 
 
-def normalize_uuid(value: object) -> str:
-    return str(value).lower()
+find_mcsp_transport = live.find_mcsp_transport
+is_bike_handshake = live.is_bike_handshake
+build_handshake_response = live.build_handshake_response
 
 
-def find_mcsp_transport(services: object) -> tuple[str, str]:
-    receive_uuid: str | None = None
-    send_uuid: str | None = None
-    for service in services:
-        if normalize_uuid(getattr(service, "uuid", "")) != mcsp.MCSP_SERVICE_UUID:
-            continue
-        for char in getattr(service, "characteristics", []):
-            uuid = normalize_uuid(getattr(char, "uuid", ""))
-            if uuid == mcsp.MCSP_RECEIVE_UUID:
-                receive_uuid = uuid
-            if uuid == mcsp.MCSP_SEND_UUID:
-                send_uuid = uuid
-    if receive_uuid is None or send_uuid is None:
-        raise RuntimeError("MCSP transport characteristics were not found.")
-    return receive_uuid, send_uuid
-
-
-def is_bike_handshake(commands: list[mcsp.Command]) -> bool:
-    version_ok = any(
-        isinstance(command, mcsp.VersionCommand) and command.version == 3
-        for command in commands
-    )
-    max_packet_seen = any(
-        isinstance(command, mcsp.MaxSegmentationPacketCommand) for command in commands
-    )
-    advanced_channels = {
-        command.channel
-        for command in commands
-        if isinstance(command, mcsp.AdvanceTransmitWindowCommand)
-    }
-    return version_ok and max_packet_seen and advanced_channels == set(NON_COMMAND_CHANNELS)
-
-
-def build_handshake_response(
-    commands: list[mcsp.Command],
-    local_packet_size: int = mcsp.DEFAULT_MAX_PACKET_SIZE,
+def build_startup_response_packets(
+    messagebus: bytes | None = None,
+    *,
+    frame: mcsp.Frame | None = None,
+    decoded: messagebus_mod.MessageFrame | None = None,
 ) -> list[bytes]:
-    remote_packet_sizes = [
-        command.max_packet_size
-        for command in commands
-        if isinstance(command, mcsp.MaxSegmentationPacketCommand)
-    ]
-    max_packet_size = local_packet_size
-    if remote_packet_sizes:
-        max_packet_size = min(max_packet_size, min(remote_packet_sizes))
-    response_commands: list[mcsp.Command] = [
-        mcsp.VersionCommand(version=3),
-        mcsp.MaxSegmentationPacketCommand(max_packet_size=max_packet_size),
-    ]
-    response_commands.extend(
-        mcsp.DisableFlowControlCommand(channel=channel)
-        for channel in NON_COMMAND_CHANNELS
-    )
-    return [mcsp.encode_command_frame(command) for command in response_commands]
-
-
-def build_startup_response_packets(messagebus: bytes) -> list[bytes]:
-    frame = mcsp.decode_frame(messagebus)
+    if frame is None:
+        if messagebus is None:
+            return []
+        frame = mcsp.decode_frame(messagebus)
     if frame.channel is mcsp.McspChannel.COMMAND:
         return []
 
-    decoded = messagebus_mod.decode_message_frame(frame.payload)
+    if decoded is None:
+        decoded = messagebus_mod.decode_message_frame(frame.payload)
     if not isinstance(decoded, messagebus_mod.DirectedFrame):
         return []
 
@@ -182,82 +130,45 @@ async def main(address: str, out_file: str = "ble_handshake.txt") -> None:
         except NotImplementedError:
             pass
 
-    state = await dump_gatt.prepare_connection(address)
-    target = dump_gatt.client_target_for_state(state)
-
-    async with BleakClient(target, timeout=20.0) as client:
+    async with live.connected_client(address, timeout=20.0) as client:
         print(f"Connected: {client.is_connected}", flush=True)
-        if not client.is_connected:
-            raise RuntimeError("Failed to connect")
-
         receive_uuid, send_uuid = find_mcsp_transport(client.services)
-
         with path.open("a", encoding="utf-8") as fh:
-            background_tasks: set[asyncio.Task[None]] = set()
-            handshake_complete = False
-
             def emit(line: str) -> None:
                 print(line, flush=True)
                 fh.write(f"{line}\n")
                 fh.flush()
 
-            async def send_packets(packets: list[bytes]) -> None:
-                for packet in packets:
-                    emit(f"{ts()} SEND hex={packet.hex()}")
-                    await client.write_gatt_char(send_uuid, packet, response=False)
-
-            def schedule_packets(packets: list[bytes]) -> None:
-                if not packets:
-                    return
-                task = loop.create_task(send_packets(packets))
-                background_tasks.add(task)
-                task.add_done_callback(background_tasks.discard)
-
             emit(f"{ts()} CONNECTED {address}")
-            handshake_future: asyncio.Future[list[mcsp.Command]] = loop.create_future()
-
-            def notify_handler(sender: Any, data: bytearray) -> None:
-                payload = bytes(data)
-                emit(f"{ts()} NOTIFY sender={sender} hex={payload.hex()} raw={payload!r}")
-                try:
-                    frames = mcsp.split_frames(payload)
-                except Exception as exc:
-                    emit(f"{ts()} DECODE_FAILED error={exc}")
-                    return
-                commands: list[mcsp.Command] = []
-                for frame in frames:
-                    emit(
-                        f"{ts()} FRAME channel={frame.channel.name} end={frame.end_of_channel} hex={frame.payload.hex()}"
-                    )
-                    if frame.channel is not mcsp.McspChannel.COMMAND:
-                        if handshake_complete:
-                            schedule_packets(
-                                build_startup_response_packets(mcsp.encode_frame(frame))
-                            )
-                        continue
-                    try:
-                        command = mcsp.decode_command_frame(frame)
-                    except Exception as exc:
-                        emit(f"{ts()} DECODE_FAILED error={exc}")
-                        continue
-                    commands.append(command)
-                    emit(f"{ts()} RECV command={command!r}")
-                if not handshake_future.done() and is_bike_handshake(commands):
-                    handshake_future.set_result(commands)
-
-            await client.start_notify(receive_uuid, notify_handler)
+            session = live.McspLiveSession(
+                client,
+                receive_uuid,
+                send_uuid,
+                startup_responder=lambda frame, decoded: build_startup_response_packets(
+                    frame=frame,
+                    decoded=decoded,
+                ),
+                on_notify=lambda sender, payload: emit(
+                    f"{ts()} NOTIFY sender={sender} hex={payload.hex()} raw={payload!r}"
+                ),
+                on_frame=lambda frame: emit(
+                    f"{ts()} FRAME channel={frame.channel.name} end={frame.end_of_channel} hex={frame.payload.hex()}"
+                ),
+                on_command=lambda command: emit(f"{ts()} RECV command={command!r}"),
+                on_message=lambda frame, decoded: emit(
+                    f"{ts()} MESSAGE {messagebus_mod.format_message_frame(decoded)}"
+                ),
+                on_decode_error=lambda _item, exc: emit(f"{ts()} DECODE_FAILED error={exc}"),
+                on_send=lambda packet: emit(f"{ts()} SEND hex={packet.hex()}"),
+            )
+            await session.start()
             try:
-                commands = await asyncio.wait_for(
-                    handshake_future,
-                    timeout=HANDSHAKE_TIMEOUT_SECONDS,
-                )
-                handshake_complete = True
-                await send_packets(build_handshake_response(commands))
+                commands = await session.wait_for_handshake(HANDSHAKE_TIMEOUT_SECONDS)
+                await session.queue_handshake_response(commands)
                 if not stop.is_set():
                     await asyncio.sleep(POST_HANDSHAKE_WAIT_SECONDS)
             finally:
-                if background_tasks:
-                    await asyncio.gather(*background_tasks, return_exceptions=True)
+                await session.stop()
                 await client.stop_notify(receive_uuid)
 
 

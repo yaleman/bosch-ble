@@ -149,9 +149,9 @@ def test_handshake_main_replies_on_mcsp_transport(
             bluetoothctl=CompletedProcess(["bluetoothctl"], 0, stdout="", stderr=""),
             busctl=CompletedProcess(["busctl"], 0, stdout="", stderr=""),
         )
-        with patch.object(handshake.dump_gatt, "prepare_connection", new=AsyncMock(return_value=state)):
-            with patch.object(handshake.dump_gatt, "client_target_for_state", return_value=target):
-                with patch.object(handshake, "BleakClient", FakeClient):
+        with patch.object(handshake.live.dump_gatt, "prepare_connection", new=AsyncMock(return_value=state)):
+            with patch.object(handshake.live.dump_gatt, "client_target_for_state", return_value=target):
+                with patch.object(handshake.live, "BleakClient", FakeClient):
                     await handshake.main("AA:BB", str(tmp_path / "handshake.log"))
 
     asyncio.run(run())
@@ -239,9 +239,9 @@ def test_handshake_main_logs_non_command_frames_after_handshake(
             bluetoothctl=CompletedProcess(["bluetoothctl"], 0, stdout="", stderr=""),
             busctl=CompletedProcess(["busctl"], 0, stdout="", stderr=""),
         )
-        with patch.object(handshake.dump_gatt, "prepare_connection", new=AsyncMock(return_value=state)):
-            with patch.object(handshake.dump_gatt, "client_target_for_state", return_value=object()):
-                with patch.object(handshake, "BleakClient", FakeClient):
+        with patch.object(handshake.live.dump_gatt, "prepare_connection", new=AsyncMock(return_value=state)):
+            with patch.object(handshake.live.dump_gatt, "client_target_for_state", return_value=object()):
+                with patch.object(handshake.live, "BleakClient", FakeClient):
                     await handshake.main("AA:BB", str(tmp_path / "handshake.log"))
 
     asyncio.run(run())
@@ -249,6 +249,99 @@ def test_handshake_main_logs_non_command_frames_after_handshake(
     output = capsys.readouterr().out
     assert "FRAME channel=CHANNEL1 end=True hex=2002c08161" in output
     assert "DECODE_FAILED" not in output
+
+
+def test_handshake_main_serializes_startup_responses_after_handshake_packets(
+    tmp_path: Path,
+) -> None:
+    receive_uuid = "00000011-eaa2-11e9-81b4-2a2ae2dbcce4"
+    send_uuid = "00000012-eaa2-11e9-81b4-2a2ae2dbcce4"
+    services = [
+        FakeService(
+            "00000010-eaa2-11e9-81b4-2a2ae2dbcce4",
+            [
+                FakeCharacteristic(receive_uuid, ["notify"]),
+                FakeCharacteristic(send_uuid, ["write-without-response"]),
+            ],
+        )
+    ]
+    writes: list[tuple[str, bytes, bool]] = []
+
+    class FakeClient:
+        def __init__(self, address_or_ble_device, timeout: float = 20.0) -> None:
+            self.address_or_ble_device = address_or_ble_device
+            self.timeout = timeout
+            self.is_connected = True
+            self.services = services
+            self._callback = None
+            self._injected = False
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb) -> None:
+            return None
+
+        async def start_notify(self, uuid: str, callback) -> None:
+            self._callback = callback
+            callback(
+                "notify-sender",
+                bytearray.fromhex(
+                    "10020103"
+                    "10030400f4"
+                    "1006020100000800"
+                    "1006020200002000"
+                    "1006020300002000"
+                    "1006020400000000"
+                    "1006020500000000"
+                    "1006020600000000"
+                    "1006020700000000"
+                ),
+            )
+
+        async def stop_notify(self, uuid: str) -> None:
+            return None
+
+        async def write_gatt_char(self, uuid: str, data: bytes, response: bool = False) -> None:
+            writes.append((uuid, data, response))
+            if not self._injected and self._callback is not None:
+                self._injected = True
+                self._callback("notify-sender", bytearray.fromhex("30052002c08161"))
+                await asyncio.sleep(0)
+
+    async def run() -> None:
+        state = bluez.BluezState(
+            address="AA:BB",
+            visible=False,
+            device=None,
+            name="sensor",
+            paired=True,
+            trusted=True,
+            connected=True,
+            services_resolved=True,
+            bluetoothctl=CompletedProcess(["bluetoothctl"], 0, stdout="", stderr=""),
+            busctl=CompletedProcess(["busctl"], 0, stdout="", stderr=""),
+        )
+        with patch.object(handshake.live.dump_gatt, "prepare_connection", new=AsyncMock(return_value=state)):
+            with patch.object(handshake.live.dump_gatt, "client_target_for_state", return_value=object()):
+                with patch.object(handshake.live, "BleakClient", FakeClient):
+                    await handshake.main("AA:BB", str(tmp_path / "handshake.log"))
+
+    asyncio.run(run())
+
+    assert [data.hex() for _, data, _ in writes] == [
+        "10020103",
+        "10030400f4",
+        "10020301",
+        "10020302",
+        "10020303",
+        "10020304",
+        "10020305",
+        "10020306",
+        "10020307",
+        "30054081a00271",
+        "3004c0810824",
+    ]
 
 
 def test_build_startup_response_packets_answers_reads_and_subscribes() -> None:

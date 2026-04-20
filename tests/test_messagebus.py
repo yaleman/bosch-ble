@@ -207,6 +207,46 @@ def test_validate_handshake_log_accepts_known_startup_burst() -> None:
     assert result.decoded["2002c0a460"].target_name == "USER_INFO"
 
 
+def test_validate_handshake_log_ignores_notify_frames_on_channel1() -> None:
+    log_text = """\
+2026-04-20T15:09:14 RECV command=VersionCommand(version=3)
+2026-04-20T15:09:14 RECV command=MaxSegmentationPacketCommand(max_packet_size=244)
+2026-04-20T15:09:14 RECV command=AdvanceTransmitWindowCommand(channel=<McspChannel.CHANNEL1: 1>, advance=2048)
+2026-04-20T15:09:14 RECV command=AdvanceTransmitWindowCommand(channel=<McspChannel.CHANNEL2: 2>, advance=8192)
+2026-04-20T15:09:14 RECV command=AdvanceTransmitWindowCommand(channel=<McspChannel.CHANNEL3: 3>, advance=8192)
+2026-04-20T15:09:14 RECV command=AdvanceTransmitWindowCommand(channel=<McspChannel.CHANNEL4: 4>, advance=0)
+2026-04-20T15:09:14 RECV command=AdvanceTransmitWindowCommand(channel=<McspChannel.CHANNEL5: 5>, advance=0)
+2026-04-20T15:09:14 RECV command=AdvanceTransmitWindowCommand(channel=<McspChannel.CHANNEL6: 6>, advance=0)
+2026-04-20T15:09:14 RECV command=AdvanceTransmitWindowCommand(channel=<McspChannel.CHANNEL7: 7>, advance=0)
+2026-04-20T15:09:14 SEND hex=10020103
+2026-04-20T15:09:14 SEND hex=10030400f4
+2026-04-20T15:09:14 SEND hex=10020301
+2026-04-20T15:09:14 SEND hex=10020302
+2026-04-20T15:09:14 SEND hex=10020303
+2026-04-20T15:09:14 SEND hex=10020304
+2026-04-20T15:09:14 SEND hex=10020305
+2026-04-20T15:09:14 SEND hex=10020306
+2026-04-20T15:09:14 SEND hex=10020307
+2026-04-20T15:09:14 FRAME channel=CHANNEL1 end=True hex=80bc084d
+2026-04-20T15:09:14 FRAME channel=CHANNEL1 end=True hex=2030c0a9210809
+2026-04-20T15:09:14 FRAME channel=CHANNEL1 end=True hex=2030c0a9220809
+2026-04-20T15:09:14 FRAME channel=CHANNEL1 end=True hex=2150c09f01
+2026-04-20T15:09:14 FRAME channel=CHANNEL1 end=True hex=2100c09f01
+2026-04-20T15:09:14 FRAME channel=CHANNEL1 end=True hex=2100c09f02
+2026-04-20T15:09:14 FRAME channel=CHANNEL1 end=True hex=2150c09f02
+2026-04-20T15:09:14 FRAME channel=CHANNEL1 end=True hex=2150c09f03
+2026-04-20T15:09:14 FRAME channel=CHANNEL1 end=True hex=2002c08161
+2026-04-20T15:09:14 FRAME channel=CHANNEL1 end=True hex=2002c09560
+2026-04-20T15:09:14 FRAME channel=CHANNEL1 end=True hex=2002c0a360
+2026-04-20T15:09:14 FRAME channel=CHANNEL1 end=True hex=2002c0a460
+"""
+
+    result = validate_live.validate_handshake_log(log_text)
+
+    assert result.passed is True
+    assert "80bc084d" not in result.decoded
+
+
 def test_validate_handshake_log_reports_missing_expectations() -> None:
     result = validate_live.validate_handshake_log("2026-04-20T15:09:14 SEND hex=10020103\n")
 

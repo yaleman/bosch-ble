@@ -8,9 +8,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from bleak import BleakClient
-
-from bosch_ble import dump_gatt
+from bosch_ble import live
 
 
 STOP = asyncio.Event()
@@ -38,14 +36,8 @@ async def main(address: str, out_file: str = "ble_log.txt") -> None:
         except NotImplementedError:
             pass
 
-    state = await dump_gatt.prepare_connection(address)
-    target = dump_gatt.client_target_for_state(state)
-
-    async with BleakClient(target, timeout=20.0) as client:
+    async with live.connected_client(address, timeout=20.0) as client:
         print(f"Connected: {client.is_connected}", flush=True)
-        if not client.is_connected:
-            raise RuntimeError("Failed to connect")
-
         with path.open("a", encoding="utf-8") as fh:
             fh.write(f"{ts()} CONNECTED {address}\n")
 

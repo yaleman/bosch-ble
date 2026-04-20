@@ -282,3 +282,15 @@ def encode_unsubscribe_response(
 
 def encode_notify(source: int, payload: bytes) -> bytes:
     return _encode_address(source, set_msb=True) + payload
+
+
+def format_message_frame(frame: MessageFrame) -> str:
+    if isinstance(frame, NotifyFrame):
+        source = frame.source_name or f"0x{frame.source:04x}"
+        summary = f"NOTIFY {source}"
+    else:
+        target = frame.target_name or f"0x{frame.destination:04x}"
+        summary = f"{frame.message_type.name} {target}"
+    if frame.payload:
+        summary += f" payload={frame.payload.hex()}"
+    return summary

@@ -35,9 +35,10 @@ BUSY_PROCESS_PATTERNS = (
     "bosch-ble-dump-gatt",
     "bosch-ble-log-chars",
     "bosch-ble-probe",
-    "btmon",
-    "tshark",
-    "wireshark",
+    "bluetoothctl scan",
+    "bluetoothctl connect",
+    "bluetoothctl pair",
+    "bluetoothctl trust",
 )
 
 
