@@ -13,7 +13,7 @@ from bosch_ble import live, mcsp, messagebus as messagebus_mod
 HANDSHAKE_TIMEOUT_SECONDS = 10.0
 POST_HANDSHAKE_WAIT_SECONDS = 1.0
 STARTUP_WRITE_ADDRESSES = {0x40A9}
-STARTUP_RPC_ADDRESSES = {0x409C}
+STARTUP_RPC_ADDRESSES = {0x409B, 0x409C}
 
 
 def ts() -> str:

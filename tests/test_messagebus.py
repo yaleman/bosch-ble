@@ -51,6 +51,17 @@ def test_decode_directed_frame_parses_update_issue_visualization_rpc() -> None:
     assert frame.target_name == "UPDATE_ISSUE_VISUALIZATION"
 
 
+def test_decode_directed_frame_parses_get_altitude_graph_rpc() -> None:
+    frame = messagebus.decode_directed_frame(bytes.fromhex("2150c09b41"))
+
+    assert frame.source == 0x2150
+    assert frame.destination == 0x409B
+    assert frame.message_type is messagebus.MessageType.RPC
+    assert frame.sequence == 1
+    assert frame.payload == b""
+    assert frame.target_name == "GET_ALTITUDE_GRAPH"
+
+
 def test_decode_directed_frame_parses_mobile_app_subscribe() -> None:
     frame = messagebus.decode_directed_frame(bytes.fromhex("2002c0a460"))
 
@@ -136,6 +147,32 @@ def test_encode_rpc_response_matches_empty_success_wire_shape() -> None:
     encoded = messagebus.encode_rpc_response(request)
 
     assert encoded.hex() == "409ca15051"
+
+
+def test_encode_read_response_matches_location_wire_shape() -> None:
+    request = messagebus.decode_directed_frame("2150c0a001")
+
+    encoded = messagebus.encode_read_response(request, b"")
+
+    assert encoded.hex() == "40a0a15011"
+
+
+def test_encode_subscribe_response_and_notify_match_navigation_advice_wire_shape() -> None:
+    request = messagebus.decode_directed_frame("2002c0a160")
+
+    response = messagebus.encode_subscribe_response(request)
+    notify = messagebus.encode_notify(0x40A1, b"")
+
+    assert response.hex() == "40a1a00270"
+    assert notify.hex() == "c0a1"
+
+
+def test_encode_rpc_response_matches_get_altitude_graph_wire_shape() -> None:
+    request = messagebus.decode_directed_frame("2150c09b41")
+
+    encoded = messagebus.encode_rpc_response(request)
+
+    assert encoded.hex() == "409ba15051"
 
 
 def test_encode_unsubscribe_response_matches_wire_shape() -> None:

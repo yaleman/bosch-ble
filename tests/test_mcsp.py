@@ -413,6 +413,51 @@ def test_build_startup_response_packets_answers_update_issue_visualization_rpc()
     assert [packet.hex() for packet in packets] == ["3005409ca15051"]
 
 
+def test_build_startup_response_packets_answers_location_read() -> None:
+    packets = handshake.build_startup_response_packets(
+        messagebus=mcsp.encode_frame(
+            mcsp.Frame(
+                end_of_channel=True,
+                channel=mcsp.McspChannel.CHANNEL1,
+                payload=bytes.fromhex("2150c0a001"),
+            )
+        )
+    )
+
+    assert [packet.hex() for packet in packets] == ["300540a0a15011"]
+
+
+def test_build_startup_response_packets_answers_navigation_advice_subscribe() -> None:
+    packets = handshake.build_startup_response_packets(
+        messagebus=mcsp.encode_frame(
+            mcsp.Frame(
+                end_of_channel=True,
+                channel=mcsp.McspChannel.CHANNEL1,
+                payload=bytes.fromhex("2002c0a160"),
+            )
+        )
+    )
+
+    assert [packet.hex() for packet in packets] == [
+        "300540a1a00270",
+        "3002c0a1",
+    ]
+
+
+def test_build_startup_response_packets_answers_get_altitude_graph_rpc() -> None:
+    packets = handshake.build_startup_response_packets(
+        messagebus=mcsp.encode_frame(
+            mcsp.Frame(
+                end_of_channel=True,
+                channel=mcsp.McspChannel.CHANNEL1,
+                payload=bytes.fromhex("2150c09b41"),
+            )
+        )
+    )
+
+    assert [packet.hex() for packet in packets] == ["3005409ba15051"]
+
+
 def test_build_startup_response_packets_returns_unsupported_for_unmapped_request() -> None:
     packets = handshake.build_startup_response_packets(
         messagebus=mcsp.encode_frame(
