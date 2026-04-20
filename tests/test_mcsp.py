@@ -5,7 +5,7 @@ from pathlib import Path
 from subprocess import CompletedProcess
 from unittest.mock import AsyncMock, patch
 
-from bosch_ble import bluez, handshake, mcsp
+from bosch_ble import bluez, handshake, live, mcsp
 
 
 class FakeCharacteristic:
@@ -172,6 +172,52 @@ def test_handshake_main_replies_on_mcsp_transport(
     assert "Connecting to AA:BB ..." in output
     assert "RECV command=VersionCommand(version=3)" in output
     assert "SEND hex=10020307" in output
+
+
+def test_connected_client_retries_transient_service_discovery_disconnect() -> None:
+    targets: list[object] = []
+    target = object()
+
+    class FakeClient:
+        attempts = 0
+
+        def __init__(self, address_or_ble_device, timeout: float = 20.0) -> None:
+            targets.append(address_or_ble_device)
+            self.address_or_ble_device = address_or_ble_device
+            self.timeout = timeout
+            self.is_connected = True
+            self.services = []
+
+        async def __aenter__(self):
+            type(self).attempts += 1
+            if type(self).attempts == 1:
+                raise RuntimeError("failed to discover services, device disconnected")
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb) -> None:
+            return None
+
+    async def run() -> None:
+        state = bluez.BluezState(
+            address="AA:BB",
+            visible=False,
+            device=None,
+            name="sensor",
+            paired=True,
+            trusted=True,
+            connected=True,
+            services_resolved=False,
+            bluetoothctl=CompletedProcess(["bluetoothctl"], 0, stdout="", stderr=""),
+            busctl=CompletedProcess(["busctl"], 0, stdout="", stderr=""),
+        )
+        with patch.object(live.dump_gatt, "prepare_connection", new=AsyncMock(return_value=state)):
+            with patch.object(live.dump_gatt, "client_target_for_state", return_value=target):
+                with patch.object(live, "BleakClient", FakeClient):
+                    async with live.connected_client("AA:BB", timeout=20.0) as client:
+                        assert client is not None
+
+    asyncio.run(run())
+    assert targets == [target, target]
 
 
 def test_handshake_main_logs_non_command_frames_after_handshake(

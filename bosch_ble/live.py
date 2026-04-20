@@ -84,12 +84,27 @@ def build_handshake_response(
 
 @asynccontextmanager
 async def connected_client(address: str, timeout: float = 20.0):
-    state = await dump_gatt.prepare_connection(address)
-    target = dump_gatt.client_target_for_state(state)
-    async with BleakClient(target, timeout=timeout) as client:
-        if not client.is_connected:
-            raise RuntimeError("Failed to connect")
-        yield client
+    last_error: Exception | None = None
+    for attempt in range(1, dump_gatt.DISCOVERY_RETRY_ATTEMPTS + 1):
+        try:
+            state = await dump_gatt.prepare_connection(address)
+            target = dump_gatt.client_target_for_state(state)
+            async with BleakClient(target, timeout=timeout) as client:
+                if not client.is_connected:
+                    raise RuntimeError("Failed to connect")
+                yield client
+                return
+        except Exception as exc:
+            last_error = exc
+            message = dump_gatt.retry_message(exc, address)
+            if attempt < dump_gatt.DISCOVERY_RETRY_ATTEMPTS and message is not None:
+                print(message)
+                await asyncio.sleep(attempt)
+                continue
+            raise
+
+    if last_error is not None:
+        raise last_error
 
 
 class McspLiveSession:
