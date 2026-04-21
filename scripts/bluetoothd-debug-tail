@@ -3,4 +3,4 @@ set -euo pipefail
 
 host="${1:-${REMOTE_HOST:?REMOTE_HOST must be set}}"
 
-ssh -tt "${host}" 'sudo journalctl -u bluetooth -f'
+ssh -o BatchMode=yes -o LogLevel=ERROR "${host}" 'sudo -n journalctl -u bluetooth -f'

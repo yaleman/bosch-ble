@@ -2,9 +2,23 @@
 set -euo pipefail
 
 host="${1:-${REMOTE_HOST:?REMOTE_HOST must be set}}"
+
+ssh -o BatchMode=yes -o LogLevel=ERROR "${host}" sudo -n bash -s <<'EOF'
+set -euo pipefail
+
 dropin_dir="/etc/systemd/system/bluetooth.service.d"
 dropin_file="/etc/systemd/system/bluetooth.service.d/debug.conf"
 
-ssh -tt "${host}" "sudo install -d ${dropin_dir}"
-ssh -tt "${host}" "printf '%s\n' '[Service]' 'ExecStart=' 'ExecStart=/usr/libexec/bluetooth/bluetoothd -d' | sudo tee ${dropin_file} >/dev/null"
-ssh -tt "${host}" "sudo systemctl daemon-reload && sudo systemctl restart bluetooth && systemctl show -p FragmentPath -p DropInPaths bluetooth.service"
+install -d "${dropin_dir}"
+cat >"${dropin_file}" <<'DROPIN'
+[Service]
+ExecStart=
+ExecStart=/usr/libexec/bluetooth/bluetoothd -d
+DROPIN
+
+systemctl daemon-reload
+systemctl restart bluetooth.service
+systemctl is-active bluetooth.service
+systemctl show -p FragmentPath -p DropInPaths bluetooth.service
+printf 'bluetoothd debug logging enabled\n'
+EOF

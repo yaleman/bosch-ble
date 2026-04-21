@@ -2,6 +2,16 @@
 set -euo pipefail
 
 host="${1:-${REMOTE_HOST:?REMOTE_HOST must be set}}"
+
+ssh -o BatchMode=yes -o LogLevel=ERROR "${host}" sudo -n bash -s <<'EOF'
+set -euo pipefail
+
 dropin_file="/etc/systemd/system/bluetooth.service.d/debug.conf"
 
-ssh -tt "${host}" "sudo rm -f ${dropin_file} && sudo systemctl daemon-reload && sudo systemctl restart bluetooth && systemctl show -p FragmentPath -p DropInPaths bluetooth.service"
+rm -f "${dropin_file}"
+systemctl daemon-reload
+systemctl restart bluetooth.service
+systemctl is-active bluetooth.service
+systemctl show -p FragmentPath -p DropInPaths bluetooth.service
+printf 'bluetoothd debug logging disabled\n'
+EOF
