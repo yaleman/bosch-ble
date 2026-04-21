@@ -30,3 +30,6 @@ run = "./scripts/bluetoothd-debug-disable"
 
 [tasks.bluetoothd-debug-tail]
 run = "./scripts/bluetoothd-debug-tail"
+
+[tasks.manual-connect-after-load-conn]
+run = "./scripts/manual-connect-after-load-conn"

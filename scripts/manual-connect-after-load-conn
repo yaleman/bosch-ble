@@ -1,0 +1,75 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+host="${1:-${REMOTE_HOST:?REMOTE_HOST must be set}}"
+addr="${2:-00:04:63:BA:64:FC}"
+
+ssh -tt "${host}" bash -s -- "${addr}" <<'EOF'
+set -euo pipefail
+
+cd ~/bosch-ble
+addr="${1}"
+stamp="$(date +%s)"
+out="/tmp/manual-connect-after-load-conn-${stamp}.out"
+log="/tmp/manual-connect-after-load-conn-${stamp}.log"
+python_bin="$(uv run python -c 'import sys; print(sys.executable)')"
+
+echo "Refreshing sudo credentials on remote host..."
+sudo -v
+
+echo "Loading phone-like LE connection parameters for ${addr}..."
+sudo "${python_bin}" -m bosch_ble.mgmt \
+  load-conn-params \
+  --address "${addr}" \
+  --controller-index 0 \
+  --address-type 1 \
+  --min-interval 24 \
+  --max-interval 24 \
+  --latency 0 \
+  --timeout 72
+
+echo "Capturing btmon trace to ${log}..."
+sudo pkill -f '^btmon$' >/dev/null 2>&1 || true
+sudo timeout 25s btmon >"${log}" 2>&1 &
+btmon_pid=$!
+
+sleep 1
+echo "Connecting to ${addr}..."
+if ! bluetoothctl connect "${addr}" >"${out}" 2>&1; then
+  true
+fi
+sleep 1
+wait "${btmon_pid}" || true
+
+echo "OUT:${out}"
+echo "LOG:${log}"
+
+python3 - "${out}" "${log}" <<'PY'
+from pathlib import Path
+import sys
+
+interesting = [
+    "Attempting to connect",
+    "Connection successful",
+    "Failed to connect",
+    "LE Create Connection",
+    "Own address type:",
+    "Min connection interval:",
+    "Max connection interval:",
+    "Supervision timeout:",
+    "LE Enhanced Connection Complete",
+    "LE Read Remote Used Features",
+    "Attribute Protocol",
+    "Bluetooth Security Manager Protocol",
+    "Disconnect Complete",
+    "Reason:",
+]
+
+for path in map(Path, sys.argv[1:]):
+    print(f"== {path} ==")
+    text = path.read_text(errors="replace")
+    for line in text.splitlines():
+        if any(token in line for token in interesting):
+            print(line)
+PY
+EOF

@@ -51,6 +51,12 @@ PHONE_LIKE_LE_CONNECTION_SYS_CONFIG = (
     "0019:2:0000",  # latency 0
     "001a:2:4800",  # supervision timeout 720 ms
 )
+PHONE_LIKE_LE_CONNECTION_UNITS = {
+    "min_interval": 24,
+    "max_interval": 24,
+    "latency": 0,
+    "timeout": 72,
+}
 
 
 def log_agent_event(message: str) -> None:
@@ -680,6 +686,42 @@ async def refresh_visible_device(address: str) -> BluezState:
     return await preflight_device(address, scan_timeout=DEFAULT_SCAN_TIMEOUT)
 
 
+async def bluez_load_connection_parameters(
+    address: str,
+    *,
+    controller_index: int = 0,
+    address_type: int = 1,
+    min_interval: int = PHONE_LIKE_LE_CONNECTION_UNITS["min_interval"],
+    max_interval: int = PHONE_LIKE_LE_CONNECTION_UNITS["max_interval"],
+    latency: int = PHONE_LIKE_LE_CONNECTION_UNITS["latency"],
+    timeout: int = PHONE_LIKE_LE_CONNECTION_UNITS["timeout"],
+) -> subprocess.CompletedProcess[str]:
+    return await run_command_async(
+        [
+            "sudo",
+            sys.executable,
+            "-m",
+            "bosch_ble.mgmt",
+            "load-conn-params",
+            "--address",
+            address,
+            "--controller-index",
+            str(controller_index),
+            "--address-type",
+            str(address_type),
+            "--min-interval",
+            str(min_interval),
+            "--max-interval",
+            str(max_interval),
+            "--latency",
+            str(latency),
+            "--timeout",
+            str(timeout),
+        ],
+        timeout=20.0,
+    )
+
+
 async def assist_connection(
     address: str,
     verbose: bool = False,
@@ -709,6 +751,14 @@ async def assist_connection(
                 info_state = await refresh_visible_device(address)
                 if verbose:
                     print_section("post-prepare preflight", info_state.bluetoothctl)
+
+                load_conn_params_result = await bluez_load_connection_parameters(address)
+                if verbose:
+                    print_section("load connection parameters", load_conn_params_result)
+                if load_conn_params_result.returncode != 0:
+                    raise RuntimeError(
+                        f"BlueZ load-conn-params failed for {address}: {summarize_failure(load_conn_params_result)}"
+                    )
 
                 if pair_backend == "btmgmt":
                     pair_result = await btmgmt_pair_device(address)
@@ -775,6 +825,14 @@ async def connect_device(
     info_state = await refresh_visible_device(address)
     if verbose:
         print_section("post-prepare preflight", info_state.bluetoothctl)
+
+    load_conn_params_result = await bluez_load_connection_parameters(address)
+    if verbose:
+        print_section("load connection parameters", load_conn_params_result)
+    if load_conn_params_result.returncode != 0:
+        raise RuntimeError(
+            f"BlueZ load-conn-params failed for {address}: {summarize_failure(load_conn_params_result)}"
+        )
 
     connect_result = await run_command_async(["bluetoothctl", "connect", address])
     if verbose:

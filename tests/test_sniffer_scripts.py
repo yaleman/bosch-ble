@@ -14,6 +14,7 @@ def test_sniffer_scripts_exist() -> None:
         "bluetoothd-debug-enable",
         "bluetoothd-debug-disable",
         "bluetoothd-debug-tail",
+        "manual-connect-after-load-conn",
     ):
         path = Path("scripts") / name
         assert path.is_file(), f"missing script: {path}"
@@ -29,6 +30,7 @@ def test_mise_exposes_sniffer_scripts() -> None:
     assert tasks["bluetoothd-debug-enable"]["run"] == "./scripts/bluetoothd-debug-enable"
     assert tasks["bluetoothd-debug-disable"]["run"] == "./scripts/bluetoothd-debug-disable"
     assert tasks["bluetoothd-debug-tail"]["run"] == "./scripts/bluetoothd-debug-tail"
+    assert tasks["manual-connect-after-load-conn"]["run"] == "./scripts/manual-connect-after-load-conn"
 
 
 def test_sniffer_scripts_use_remote_host_environment_variable() -> None:
@@ -39,6 +41,7 @@ def test_sniffer_scripts_use_remote_host_environment_variable() -> None:
         "bluetoothd-debug-enable",
         "bluetoothd-debug-disable",
         "bluetoothd-debug-tail",
+        "manual-connect-after-load-conn",
     ):
         content = (Path("scripts") / name).read_text()
         assert "REMOTE_HOST" in content
@@ -67,6 +70,66 @@ def test_bluetoothd_debug_scripts_manage_expected_dropin() -> None:
     assert "BatchMode=yes" in tail
     assert "sudo -n journalctl -u bluetooth -f" in tail
     assert "journalctl -u bluetooth -f" in tail
+
+
+def test_manual_connect_after_load_conn_runs_interactive_remote_trace(
+    tmp_path: Path,
+) -> None:
+    script = (Path("scripts") / "manual-connect-after-load-conn").read_text()
+
+    assert 'host="${1:-${REMOTE_HOST:?REMOTE_HOST must be set}}"' in script
+    assert 'addr="${2:-00:04:63:BA:64:FC}"' in script
+    assert "ssh -tt" in script
+    assert "sudo -v" in script
+    assert '-m bosch_ble.mgmt \\' in script
+    assert 'load-conn-params \\' in script
+    assert 'sudo timeout 25s btmon' in script
+    assert 'bluetoothctl connect "${addr}"' in script
+    assert 'echo "OUT:${out}"' in script
+    assert 'echo "LOG:${log}"' in script
+
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    log_path = tmp_path / "ssh.log"
+    stdin_path = tmp_path / "ssh.stdin"
+    fake_ssh = bin_dir / "ssh"
+    fake_ssh.write_text(
+        "\n".join(
+            [
+                "#!/usr/bin/env bash",
+                "set -euo pipefail",
+                f"printf '%s\\n' \"$@\" > {log_path}",
+                f"cat > {stdin_path}",
+            ]
+        )
+        + "\n"
+    )
+    fake_ssh.chmod(0o755)
+
+    env = os.environ | {"PATH": f"{bin_dir}:{os.environ['PATH']}", "REMOTE_HOST": "bikebox"}
+    result = subprocess.run(
+        ["bash", "scripts/manual-connect-after-load-conn"],
+        cwd=Path.cwd(),
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert log_path.read_text().splitlines() == [
+        "-tt",
+        "bikebox",
+        "bash",
+        "-s",
+        "--",
+        "00:04:63:BA:64:FC",
+    ]
+    payload = stdin_path.read_text()
+    assert "sudo -v" in payload
+    assert "sudo \"${python_bin}\" -m bosch_ble.mgmt" in payload
+    assert "sudo timeout 25s btmon" in payload
+    assert "bluetoothctl connect \"${addr}\"" in payload
 
 
 def test_bluetoothd_debug_enable_runs_noninteractive_single_ssh_session(
