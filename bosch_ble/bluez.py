@@ -291,7 +291,17 @@ def summarize_failure(result: subprocess.CompletedProcess[str]) -> str:
 def detect_trace_stage(trace_text: str) -> str:
     has_smp = "SMP" in trace_text or "Security Manager Protocol" in trace_text
     has_att = "ATT" in trace_text or "Attribute Protocol" in trace_text
-    has_ll_control = "LL_" in trace_text or "Read Remote Version Information" in trace_text
+    has_ll_control = any(
+        marker in trace_text
+        for marker in (
+            "Control Opcode: LL_",
+            "LL_VERSION_IND",
+            "LL_FEATURE_REQ",
+            "LL_FEATURE_RSP",
+            "LL_LENGTH_REQ",
+            "LL_LENGTH_RSP",
+        )
+    )
     has_remote_features = "LE Read Remote Used Features" in trace_text
     has_connection_complete = "LE Enhanced Connection Complete" in trace_text
 
