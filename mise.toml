@@ -21,3 +21,12 @@ run = "./scripts/sniff-stop"
 
 [tasks.sniff-copy]
 run = "./scripts/sniff-copy"
+
+[tasks.bluetoothd-debug-enable]
+run = "./scripts/bluetoothd-debug-enable"
+
+[tasks.bluetoothd-debug-disable]
+run = "./scripts/bluetoothd-debug-disable"
+
+[tasks.bluetoothd-debug-tail]
+run = "./scripts/bluetoothd-debug-tail"

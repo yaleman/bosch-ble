@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+host="${1:-${REMOTE_HOST:?REMOTE_HOST must be set}}"
+dropin_file="/etc/systemd/system/bluetooth.service.d/debug.conf"
+
+ssh -tt "${host}" "sudo rm -f ${dropin_file} && sudo systemctl daemon-reload && sudo systemctl restart bluetooth && systemctl show -p FragmentPath -p DropInPaths bluetooth.service"

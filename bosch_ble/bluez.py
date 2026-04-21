@@ -511,11 +511,17 @@ async def bluez_set_pairable(pairable: bool = True) -> subprocess.CompletedProce
     return await run_command_async(["bluetoothctl", "pairable", value])
 
 
+async def bluez_set_bondable(bondable: bool = True) -> subprocess.CompletedProcess[str]:
+    value = "on" if bondable else "off"
+    return await run_command_async(["sudo", "btmgmt", "bondable", value])
+
+
 async def assist_connection(address: str, verbose: bool = False) -> BluezState:
     info_result = await run_command_async(["bluetoothctl", "info", address])
     info_state = build_state(address, info_result, None)
     steps = [("bluetoothctl info", ["bluetoothctl", "info", address], info_result)]
     if info_state.paired is not True:
+        steps.append(("sudo btmgmt bondable on", ["sudo", "btmgmt", "bondable", "on"], None))
         steps.append(("bluetoothctl pairable on", ["bluetoothctl", "pairable", "on"], None))
         steps.append(("bluez pair", ["bluez", "pair", address], None))
     if info_state.trusted is not True:
@@ -530,12 +536,16 @@ async def assist_connection(address: str, verbose: bool = False) -> BluezState:
                     result = await bluez_pair_device(address)
                 elif argv[:2] == ["bluez", "trust"]:
                     result = await bluez_set_trusted(address)
+                elif argv[:4] == ["sudo", "btmgmt", "bondable", "on"]:
+                    result = await bluez_set_bondable(True)
                 elif argv[:3] == ["bluetoothctl", "pairable", "on"]:
                     result = await bluez_set_pairable(True)
                 else:
                     result = await run_command_async(argv)
             if verbose:
                 print_section(title, result)
+            if argv[:4] == ["sudo", "btmgmt", "bondable", "on"] and result.returncode != 0:
+                raise RuntimeError(f"BlueZ bondable failed for {address}: {summarize_failure(result)}")
             if argv[:2] == ["bluez", "pair"] and result.returncode != 0:
                 state = await asyncio.to_thread(read_device_state, address)
                 if state.paired is not True:

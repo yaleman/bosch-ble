@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+host="${1:-${REMOTE_HOST:?REMOTE_HOST must be set}}"
+dropin_dir="/etc/systemd/system/bluetooth.service.d"
+dropin_file="/etc/systemd/system/bluetooth.service.d/debug.conf"
+
+ssh -tt "${host}" "sudo install -d ${dropin_dir}"
+ssh -tt "${host}" "printf '%s\n' '[Service]' 'ExecStart=' 'ExecStart=/usr/libexec/bluetooth/bluetoothd -d' | sudo tee ${dropin_file} >/dev/null"
+ssh -tt "${host}" "sudo systemctl daemon-reload && sudo systemctl restart bluetooth && systemctl show -p FragmentPath -p DropInPaths bluetooth.service"
