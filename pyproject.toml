@@ -15,6 +15,7 @@ dev = ["mypy>=1.20.1", "pytest>=9.0.3", "ruff>=0.15.11", "ty>=0.0.31"]
 
 [project.scripts]
 bosch-ble-bluez-connect = "bosch_ble.bluez:connect_cli"
+bosch-ble-bluez-diagnose-pair = "bosch_ble.bluez:diagnose_pair_cli"
 bosch-ble-bluez-info = "bosch_ble.bluez:info_cli"
 bosch-ble-bluez-preflight = "bosch_ble.bluez:preflight_cli"
 bosch-ble-bluez-wait-services = "bosch_ble.bluez:wait_services_cli"

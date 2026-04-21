@@ -3,12 +3,15 @@ from __future__ import annotations
 
 import asyncio
 import os
+import re
 import shutil
 import subprocess
 import sys
+import tempfile
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
-from typing import Annotated, Any
+from pathlib import Path
+from typing import Annotated, Any, Literal
 from uuid import uuid4
 
 from bleak import BleakScanner
@@ -73,6 +76,23 @@ class BluezState:
     services_resolved: bool | None
     bluetoothctl: subprocess.CompletedProcess[str]
     busctl: subprocess.CompletedProcess[str] | None
+
+
+@dataclass(slots=True)
+class PairAttemptSummary:
+    pair_backend: str
+    privacy: str
+    visible: bool
+    name: str | None
+    assist_error: str | None
+    create_connection_seen: bool
+    enhanced_connection_complete_seen: bool
+    read_remote_features_seen: bool
+    disconnect_reason: str | None
+    att_seen: bool
+    smp_seen: bool
+    highest_stage: str
+    trace_path: str
 
 
 def run_command(argv: list[str], timeout: float = 15.0) -> subprocess.CompletedProcess[str]:
@@ -266,6 +286,77 @@ def summarize_failure(result: subprocess.CompletedProcess[str]) -> str:
     if candidates:
         return candidates[0].splitlines()[-1]
     return f"exit code {result.returncode}"
+
+
+def detect_trace_stage(trace_text: str) -> str:
+    has_smp = "SMP" in trace_text or "Security Manager Protocol" in trace_text
+    has_att = "ATT" in trace_text or "Attribute Protocol" in trace_text
+    has_ll_control = "LL_" in trace_text or "Read Remote Version Information" in trace_text
+    has_remote_features = "LE Read Remote Used Features" in trace_text
+    has_connection_complete = "LE Enhanced Connection Complete" in trace_text
+
+    if has_smp:
+        return "smp"
+    if has_att:
+        return "att"
+    if has_ll_control:
+        return "ll_control"
+    if has_remote_features:
+        return "remote_features"
+    if has_connection_complete:
+        return "connection_complete"
+    return "pre_connection"
+
+
+def summarize_btmon_trace(
+    trace_text: str,
+    *,
+    pair_backend: str,
+    privacy: str,
+    visible: bool,
+    name: str | None,
+    assist_error: str | None,
+    trace_path: str,
+) -> PairAttemptSummary:
+    disconnect_reason = None
+    match = re.search(r"Reason:\s+([^\n]+)", trace_text)
+    if match is not None:
+        disconnect_reason = match.group(1).strip()
+
+    return PairAttemptSummary(
+        pair_backend=pair_backend,
+        privacy=privacy,
+        visible=visible,
+        name=name,
+        assist_error=assist_error,
+        create_connection_seen="LE Create Connection" in trace_text,
+        enhanced_connection_complete_seen="LE Enhanced Connection Complete" in trace_text,
+        read_remote_features_seen="LE Read Remote Used Features" in trace_text,
+        disconnect_reason=disconnect_reason,
+        att_seen="ATT" in trace_text or "Attribute Protocol" in trace_text,
+        smp_seen="SMP" in trace_text or "Security Manager Protocol" in trace_text,
+        highest_stage=detect_trace_stage(trace_text),
+        trace_path=trace_path,
+    )
+
+
+def print_pair_attempt_summary(summary: PairAttemptSummary) -> None:
+    print(f"Backend: {summary.pair_backend}")
+    print(f"Privacy: {summary.privacy}")
+    print(f"Visible: {format_flag(summary.visible)}")
+    if summary.name:
+        print(f"Name: {summary.name}")
+    print(f"HighestStage: {summary.highest_stage}")
+    print(f"CreateConnection: {format_flag(summary.create_connection_seen)}")
+    print(f"EnhancedConnectionComplete: {format_flag(summary.enhanced_connection_complete_seen)}")
+    print(f"ReadRemoteFeatures: {format_flag(summary.read_remote_features_seen)}")
+    print(f"ATT: {format_flag(summary.att_seen)}")
+    print(f"SMP: {format_flag(summary.smp_seen)}")
+    if summary.disconnect_reason:
+        print(f"DisconnectReason: {summary.disconnect_reason}")
+    if summary.assist_error:
+        print(f"AssistError: {summary.assist_error}")
+    print(f"Trace: {summary.trace_path}")
 
 
 def is_transient_pair_failure(result: subprocess.CompletedProcess[str]) -> bool:
@@ -501,6 +592,13 @@ async def bluez_pair_device(address: str) -> subprocess.CompletedProcess[str]:
     return subprocess.CompletedProcess(["bluez", "pair", address], 0, stdout="", stderr="")
 
 
+async def btmgmt_pair_device(address: str) -> subprocess.CompletedProcess[str]:
+    return await run_command_async(
+        ["sudo", "btmgmt", "pair", "-c", "4", "-t", "le-public", address],
+        timeout=20.0,
+    )
+
+
 async def bluez_set_trusted(address: str, trusted: bool = True) -> subprocess.CompletedProcess[str]:
     device_path = find_device_object_path(address)
     if device_path is None:
@@ -550,14 +648,14 @@ async def bluez_set_bondable(bondable: bool = True) -> subprocess.CompletedProce
     return await run_command_async(["sudo", "btmgmt", "bondable", value])
 
 
-async def bluez_prepare_phone_like_pairing_controller() -> None:
+async def bluez_prepare_phone_like_pairing_controller(*, privacy: bool = True) -> None:
     steps = [
         ("power off", lambda: bluez_set_power(False)),
         (
             "set-sysconfig",
             lambda: run_command_async(["sudo", "btmgmt", "set-sysconfig", "-v", *PHONE_LIKE_LE_CONNECTION_SYS_CONFIG]),
         ),
-        ("privacy", lambda: bluez_set_privacy(True)),
+        ("privacy", lambda: bluez_set_privacy(privacy)),
         ("bondable", lambda: bluez_set_bondable(True)),
         ("power on", lambda: bluez_set_power(True)),
     ]
@@ -568,7 +666,13 @@ async def bluez_prepare_phone_like_pairing_controller() -> None:
             raise RuntimeError(f"BlueZ {label} failed: {summarize_failure(result)}")
 
 
-async def assist_connection(address: str, verbose: bool = False) -> BluezState:
+async def assist_connection(
+    address: str,
+    verbose: bool = False,
+    *,
+    pair_backend: Literal["dbus", "btmgmt"] = "dbus",
+    privacy: bool = True,
+) -> BluezState:
     info_result = await run_command_async(["bluetoothctl", "info", address])
     info_state = build_state(address, info_result, None)
     if is_device_unavailable(info_result):
@@ -582,16 +686,19 @@ async def assist_connection(address: str, verbose: bool = False) -> BluezState:
         if info_state.paired is not True:
             last_pair_result: subprocess.CompletedProcess[str] | None = None
             for attempt in range(3):
-                await bluez_prepare_phone_like_pairing_controller()
+                await bluez_prepare_phone_like_pairing_controller(privacy=privacy)
 
                 pairable_result = await bluez_set_pairable(True)
                 if verbose:
                     print_section("bluetoothctl pairable on", pairable_result)
 
-                pair_result = await bluez_pair_device(address)
+                if pair_backend == "btmgmt":
+                    pair_result = await btmgmt_pair_device(address)
+                else:
+                    pair_result = await bluez_pair_device(address)
                 last_pair_result = pair_result
                 if verbose:
-                    print_section("bluez pair", pair_result)
+                    print_section(f"{pair_backend} pair", pair_result)
                 if pair_result.returncode == 0:
                     break
 
@@ -709,6 +816,88 @@ async def wait_for_state(
     raise RuntimeError(f"BlueZ did not reach {expected} for {address}.")
 
 
+@asynccontextmanager
+async def btmon_text_capture(prefix: str = "bosch-btmon-"):
+    with tempfile.NamedTemporaryFile("w+", prefix=prefix, suffix=".log", delete=False) as handle:
+        trace_path = Path(handle.name)
+
+    process = await asyncio.create_subprocess_exec(
+        "sudo",
+        "btmon",
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.STDOUT,
+    )
+    writer_task: asyncio.Task[None] | None = None
+
+    async def pump() -> None:
+        assert process.stdout is not None
+        with trace_path.open("wb") as output:
+            while True:
+                chunk = await process.stdout.read(4096)
+                if not chunk:
+                    break
+                output.write(chunk)
+
+    writer_task = asyncio.create_task(pump())
+    try:
+        yield trace_path
+    finally:
+        if process.returncode is None:
+            process.terminate()
+            try:
+                await asyncio.wait_for(process.wait(), timeout=5.0)
+            except TimeoutError:
+                process.kill()
+                await process.wait()
+        if writer_task is not None:
+            await writer_task
+
+
+async def run_pair_diagnostic_attempt(
+    address: str,
+    *,
+    pair_backend: Literal["dbus", "btmgmt"],
+    privacy: bool,
+    scan_timeout: float = DEFAULT_SCAN_TIMEOUT,
+) -> PairAttemptSummary:
+    preflight = await preflight_device(address, scan_timeout=scan_timeout)
+    if preflight.visible is not True:
+        return PairAttemptSummary(
+            pair_backend=pair_backend,
+            privacy="device" if privacy else "off",
+            visible=False,
+            name=preflight.name,
+            assist_error="Device not visible during preflight",
+            create_connection_seen=False,
+            enhanced_connection_complete_seen=False,
+            read_remote_features_seen=False,
+            disconnect_reason=None,
+            att_seen=False,
+            smp_seen=False,
+            highest_stage="pre_connection",
+            trace_path="",
+        )
+
+    assist_error: str | None = None
+    async with btmon_text_capture() as trace_path:
+        try:
+            await assist_connection(address, verbose=False, pair_backend=pair_backend, privacy=privacy)
+        except Exception as exc:
+            assist_error = format_cli_error(exc)
+        await asyncio.sleep(0.5)
+
+    trace_text = trace_path.read_text(encoding="utf-8", errors="replace")
+    return summarize_btmon_trace(
+        trace_text,
+        pair_backend=pair_backend,
+        privacy="device" if privacy else "off",
+        visible=True,
+        name=preflight.name,
+        assist_error=assist_error,
+        trace_path=str(trace_path),
+    )
+
+
 def info_cli() -> None:
     if len(sys.argv) != 2:
         print(f"Usage: {sys.argv[0]} <BLE_ADDRESS>")
@@ -732,6 +921,33 @@ def preflight_cli() -> None:
     try:
         state = asyncio.run(preflight_device(sys.argv[1]))
         print_preflight_report(state)
+    except KeyboardInterrupt:
+        raise SystemExit(130)
+    except Exception as exc:
+        print(f"Error: {format_cli_error(exc)}", file=sys.stderr)
+        raise SystemExit(1)
+
+
+def diagnose_pair_cli() -> None:
+    if len(sys.argv) != 2:
+        print(f"Usage: {sys.argv[0]} <BLE_ADDRESS>")
+        raise SystemExit(2)
+
+    address = sys.argv[1]
+    attempts = [
+        ("dbus", True),
+        ("dbus", False),
+        ("btmgmt", True),
+        ("btmgmt", False),
+    ]
+
+    try:
+        for pair_backend, privacy in attempts:
+            print(f"== attempt backend={pair_backend} privacy={'device' if privacy else 'off'} ==")
+            summary = asyncio.run(
+                run_pair_diagnostic_attempt(address, pair_backend=pair_backend, privacy=privacy)
+            )
+            print_pair_attempt_summary(summary)
     except KeyboardInterrupt:
         raise SystemExit(130)
     except Exception as exc:

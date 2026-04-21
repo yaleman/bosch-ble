@@ -415,8 +415,8 @@ def test_assist_connection_runs_pair_trust_connect_inside_pairing_agent() -> Non
             events.append(("bluetoothctl", "pairable", pairable))
             return pairable_result
 
-        async def fake_prepare_controller() -> None:
-            events.append(("btmgmt", "prepare-phone-like-controller"))
+        async def fake_prepare_controller(*, privacy: bool = True) -> None:
+            events.append(("btmgmt", "prepare-phone-like-controller", privacy))
 
         with patch.object(bluez, "pairing_agent", side_effect=fake_pairing_agent):
             with patch.object(bluez, "run_command_async", side_effect=fake_run_command):
@@ -437,7 +437,7 @@ def test_assist_connection_runs_pair_trust_connect_inside_pairing_agent() -> Non
     assert events == [
         ("bluetoothctl", "info", "AA:BB"),
         ("agent_enter", "AA:BB"),
-        ("btmgmt", "prepare-phone-like-controller"),
+        ("btmgmt", "prepare-phone-like-controller", True),
         ("bluetoothctl", "pairable", True),
         ("bluez", "pair", "AA:BB"),
         ("bluez", "trust", "AA:BB", True),
@@ -597,8 +597,8 @@ def test_assist_connection_retries_transient_pair_failure_before_succeeding() ->
             events.append(("bluetoothctl", "pairable", pairable))
             return pairable_result
 
-        async def fake_prepare_controller() -> None:
-            events.append(("btmgmt", "prepare-phone-like-controller"))
+        async def fake_prepare_controller(*, privacy: bool = True) -> None:
+            events.append(("btmgmt", "prepare-phone-like-controller", privacy))
 
         async def fake_pair_device(address: str) -> CompletedProcess[str]:
             events.append(("bluez", "pair", address))
@@ -642,10 +642,10 @@ def test_assist_connection_retries_transient_pair_failure_before_succeeding() ->
     asyncio.run(run())
     assert events == [
         ("bluetoothctl", "info", "AA:BB"),
-        ("btmgmt", "prepare-phone-like-controller"),
+        ("btmgmt", "prepare-phone-like-controller", True),
         ("bluetoothctl", "pairable", True),
         ("bluez", "pair", "AA:BB"),
-        ("btmgmt", "prepare-phone-like-controller"),
+        ("btmgmt", "prepare-phone-like-controller", True),
         ("bluetoothctl", "pairable", True),
         ("bluez", "pair", "AA:BB"),
         ("bluez", "trust", "AA:BB", True),
@@ -707,8 +707,8 @@ def test_assist_connection_refreshes_device_when_bluetoothctl_info_is_unavailabl
             events.append(("bluetoothctl", "pairable", pairable))
             return pairable_result
 
-        async def fake_prepare_controller() -> None:
-            events.append(("btmgmt", "prepare-phone-like-controller"))
+        async def fake_prepare_controller(*, privacy: bool = True) -> None:
+            events.append(("btmgmt", "prepare-phone-like-controller", privacy))
 
         async def fake_pair_device(address: str) -> CompletedProcess[str]:
             events.append(("bluez", "pair", address))
@@ -738,7 +738,7 @@ def test_assist_connection_refreshes_device_when_bluetoothctl_info_is_unavailabl
     asyncio.run(run())
     assert events == [
         ("bluetoothctl", "info", "AA:BB"),
-        ("btmgmt", "prepare-phone-like-controller"),
+        ("btmgmt", "prepare-phone-like-controller", True),
         ("bluetoothctl", "pairable", True),
         ("bluez", "pair", "AA:BB"),
         ("bluez", "trust", "AA:BB", True),
@@ -862,6 +862,144 @@ def test_prepare_phone_like_pairing_controller_raises_on_failure() -> None:
 
     asyncio.run(run())
 
+
+def test_summarize_btmon_trace_reports_remote_features_only() -> None:
+    trace_text = """
+< HCI Command: LE Create Connection
+> HCI Event: LE Enhanced Connection Complete
+< HCI Command: LE Read Remote Used Features
+> HCI Event: Disconnect Complete
+        Reason: Connection Failed to be Established (0x3e)
+"""
+    summary = bluez.summarize_btmon_trace(
+        trace_text,
+        pair_backend="dbus",
+        privacy="device",
+        visible=True,
+        name="smart system eBike",
+        assist_error="Authentication Canceled",
+        trace_path="/tmp/trace.log",
+    )
+
+    assert summary.create_connection_seen is True
+    assert summary.enhanced_connection_complete_seen is True
+    assert summary.read_remote_features_seen is True
+    assert summary.att_seen is False
+    assert summary.smp_seen is False
+    assert summary.highest_stage == "remote_features"
+    assert summary.disconnect_reason == "Connection Failed to be Established (0x3e)"
+
+
+def test_summarize_btmon_trace_reports_smp_stage() -> None:
+    trace_text = """
+< HCI Command: LE Create Connection
+> HCI Event: LE Enhanced Connection Complete
+Bluetooth Security Manager Protocol
+    Opcode: Pairing Request (0x01)
+"""
+    summary = bluez.summarize_btmon_trace(
+        trace_text,
+        pair_backend="btmgmt",
+        privacy="off",
+        visible=True,
+        name="smart system eBike",
+        assist_error=None,
+        trace_path="/tmp/trace.log",
+    )
+
+    assert summary.highest_stage == "smp"
+    assert summary.smp_seen is True
+
+
+def test_assist_connection_uses_btmgmt_pair_backend() -> None:
+    info_result = CompletedProcess(["bluetoothctl", "info", "AA:BB"], 0, stdout="", stderr="")
+    pairable_result = CompletedProcess(["bluetoothctl", "pairable", "on"], 0, stdout="", stderr="")
+    pair_result = CompletedProcess(["sudo", "btmgmt", "pair", "-c", "4", "-t", "le-public", "AA:BB"], 0, stdout="", stderr="")
+    trust_result = CompletedProcess(["bluez", "trust", "AA:BB"], 0, stdout="", stderr="")
+    connect_result = CompletedProcess(["bluetoothctl", "connect", "AA:BB"], 0, stdout="Connected: yes\n", stderr="")
+    connected_state = bluez.BluezState(
+        address="AA:BB",
+        visible=True,
+        device=None,
+        name="sensor",
+        paired=True,
+        trusted=True,
+        connected=True,
+        services_resolved=None,
+        bluetoothctl=CompletedProcess(["bluetoothctl"], 0, stdout="Connected: yes\n", stderr=""),
+        busctl=None,
+    )
+
+    @asynccontextmanager
+    async def fake_pairing_agent(_address: str):
+        yield
+
+    async def run() -> None:
+        with patch.object(bluez, "run_command_async", side_effect=[info_result, connect_result]):
+            with patch.object(bluez, "bluez_prepare_phone_like_pairing_controller", new=AsyncMock()):
+                with patch.object(bluez, "bluez_set_pairable", return_value=pairable_result):
+                    with patch.object(bluez, "btmgmt_pair_device", return_value=pair_result) as pair_mock:
+                        with patch.object(bluez, "bluez_set_trusted", return_value=trust_result):
+                            with patch.object(bluez, "pairing_agent", side_effect=fake_pairing_agent):
+                                with patch.object(bluez, "read_device_state", return_value=connected_state):
+                                    result = await bluez.assist_connection("AA:BB", pair_backend="btmgmt")
+
+        assert result is connected_state
+        pair_mock.assert_awaited_once_with("AA:BB")
+
+    asyncio.run(run())
+
+
+def test_bluez_diagnose_pair_cli_shows_usage_without_address(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    with patch("sys.argv", ["bosch-ble-bluez-diagnose-pair"]):
+        with pytest.raises(SystemExit) as excinfo:
+            bluez.diagnose_pair_cli()
+
+    assert excinfo.value.code == 2
+    assert "Usage: bosch-ble-bluez-diagnose-pair <BLE_ADDRESS>" in capsys.readouterr().out
+
+
+def test_bluez_diagnose_pair_cli_runs_all_attempts(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    summaries: list[bluez.PairAttemptSummary] = []
+    for pair_backend in ("dbus", "dbus", "btmgmt", "btmgmt"):
+        summaries.append(
+            bluez.PairAttemptSummary(
+                pair_backend=pair_backend,
+                privacy="device" if len(summaries) % 2 == 0 else "off",
+                visible=True,
+                name="smart system eBike",
+                assist_error=None,
+                create_connection_seen=True,
+                enhanced_connection_complete_seen=True,
+                read_remote_features_seen=True,
+                disconnect_reason=None,
+                att_seen=False,
+                smp_seen=False,
+                highest_stage="remote_features",
+                trace_path="/tmp/trace.log",
+            )
+        )
+
+    with patch.object(bluez, "run_pair_diagnostic_attempt", new=AsyncMock(side_effect=summaries)) as diag_mock:
+        with patch("sys.argv", ["bosch-ble-bluez-diagnose-pair", "AA:BB"]):
+            bluez.diagnose_pair_cli()
+
+    assert diag_mock.await_count == 4
+    calls = [(call.args, call.kwargs) for call in diag_mock.await_args_list]
+    assert calls == [
+        (("AA:BB",), {"pair_backend": "dbus", "privacy": True}),
+        (("AA:BB",), {"pair_backend": "dbus", "privacy": False}),
+        (("AA:BB",), {"pair_backend": "btmgmt", "privacy": True}),
+        (("AA:BB",), {"pair_backend": "btmgmt", "privacy": False}),
+    ]
+    output = capsys.readouterr().out
+    assert "attempt backend=dbus privacy=device" in output
+    assert "attempt backend=btmgmt privacy=off" in output
+    assert "HighestStage: remote_features" in output
 
 def test_dump_gatt_main_runs_preflight_and_assisted_connect_before_bleak_client(
     capsys: pytest.CaptureFixture[str],
