@@ -676,6 +676,10 @@ async def bluez_prepare_phone_like_pairing_controller(*, privacy: bool = False) 
             raise RuntimeError(f"BlueZ {label} failed: {summarize_failure(result)}")
 
 
+async def refresh_visible_device(address: str) -> BluezState:
+    return await preflight_device(address, scan_timeout=DEFAULT_SCAN_TIMEOUT)
+
+
 async def assist_connection(
     address: str,
     verbose: bool = False,
@@ -701,6 +705,10 @@ async def assist_connection(
                 pairable_result = await bluez_set_pairable(True)
                 if verbose:
                     print_section("bluetoothctl pairable on", pairable_result)
+
+                info_state = await refresh_visible_device(address)
+                if verbose:
+                    print_section("post-prepare preflight", info_state.bluetoothctl)
 
                 if pair_backend == "btmgmt":
                     pair_result = await btmgmt_pair_device(address)
@@ -763,6 +771,10 @@ async def connect_device(
     pairable_result = await bluez_set_pairable(True)
     if verbose:
         print_section("bluetoothctl pairable on", pairable_result)
+
+    info_state = await refresh_visible_device(address)
+    if verbose:
+        print_section("post-prepare preflight", info_state.bluetoothctl)
 
     connect_result = await run_command_async(["bluetoothctl", "connect", address])
     if verbose:

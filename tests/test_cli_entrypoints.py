@@ -357,9 +357,10 @@ def test_assist_connection_accepts_connected_state_after_local_abort() -> None:
                 with patch.object(bluez, "bluez_set_trusted", return_value=trust_result):
                     with patch.object(bluez, "bluez_set_pairable", return_value=pairable_result):
                         with patch.object(bluez, "bluez_prepare_phone_like_pairing_controller", new=AsyncMock()):
-                            with patch.object(bluez, "pairing_agent", side_effect=fake_pairing_agent):
-                                with patch.object(bluez, "read_device_state", return_value=connected_state):
-                                    result = await bluez.assist_connection("AA:BB")
+                            with patch.object(bluez, "refresh_visible_device", new=AsyncMock(return_value=connected_state)):
+                                with patch.object(bluez, "pairing_agent", side_effect=fake_pairing_agent):
+                                    with patch.object(bluez, "read_device_state", return_value=connected_state):
+                                        result = await bluez.assist_connection("AA:BB")
 
         assert result is connected_state
 
@@ -373,6 +374,18 @@ def test_assist_connection_runs_pair_trust_connect_inside_pairing_agent() -> Non
     pair_result = CompletedProcess(["bluez", "pair", "AA:BB"], 0, stdout="", stderr="")
     trust_result = CompletedProcess(["bluez", "trust", "AA:BB"], 0, stdout="", stderr="")
     connect_result = CompletedProcess(["bluetoothctl", "connect", "AA:BB"], 0, stdout="Connected: yes\n", stderr="")
+    post_prepare_state = bluez.BluezState(
+        address="AA:BB",
+        visible=True,
+        device=None,
+        name="sensor",
+        paired=False,
+        trusted=False,
+        connected=False,
+        services_resolved=None,
+        bluetoothctl=CompletedProcess(["bluetoothctl"], 0, stdout="Paired: no\nTrusted: no\n", stderr=""),
+        busctl=None,
+    )
     connected_state = bluez.BluezState(
         address="AA:BB",
         visible=True,
@@ -418,6 +431,10 @@ def test_assist_connection_runs_pair_trust_connect_inside_pairing_agent() -> Non
         async def fake_prepare_controller(*, privacy: bool = False) -> None:
             events.append(("btmgmt", "prepare-phone-like-controller", privacy))
 
+        async def fake_refresh_visible_device(address: str) -> bluez.BluezState:
+            events.append(("preflight_device", address))
+            return post_prepare_state
+
         with patch.object(bluez, "pairing_agent", side_effect=fake_pairing_agent):
             with patch.object(bluez, "run_command_async", side_effect=fake_run_command):
                 with patch.object(bluez, "bluez_pair_device", side_effect=fake_pair_device):
@@ -428,8 +445,9 @@ def test_assist_connection_runs_pair_trust_connect_inside_pairing_agent() -> Non
                                 "bluez_prepare_phone_like_pairing_controller",
                                 side_effect=fake_prepare_controller,
                             ):
-                                with patch.object(bluez, "read_device_state", return_value=connected_state):
-                                    result = await bluez.assist_connection("AA:BB")
+                                with patch.object(bluez, "refresh_visible_device", side_effect=fake_refresh_visible_device):
+                                    with patch.object(bluez, "read_device_state", return_value=connected_state):
+                                        result = await bluez.assist_connection("AA:BB")
 
         assert result is connected_state
 
@@ -439,6 +457,7 @@ def test_assist_connection_runs_pair_trust_connect_inside_pairing_agent() -> Non
         ("agent_enter", "AA:BB"),
         ("btmgmt", "prepare-phone-like-controller", False),
         ("bluetoothctl", "pairable", True),
+        ("preflight_device", "AA:BB"),
         ("bluez", "pair", "AA:BB"),
         ("bluez", "trust", "AA:BB", True),
         ("bluetoothctl", "connect", "AA:BB"),
@@ -537,10 +556,11 @@ def test_assist_connection_fails_when_pair_fails_and_device_remains_unpaired() -
             with patch.object(bluez, "pairing_agent", side_effect=fake_pairing_agent):
                 with patch.object(bluez, "bluez_set_pairable", return_value=pairable_result):
                     with patch.object(bluez, "bluez_prepare_phone_like_pairing_controller", new=AsyncMock()):
-                        with patch.object(bluez, "bluez_pair_device", return_value=pair_result):
-                            with patch.object(bluez, "read_device_state", return_value=unpaired_state):
-                                with pytest.raises(RuntimeError, match="BlueZ pair failed for AA:BB"):
-                                    await bluez.assist_connection("AA:BB")
+                        with patch.object(bluez, "refresh_visible_device", new=AsyncMock(return_value=unpaired_state)):
+                            with patch.object(bluez, "bluez_pair_device", return_value=pair_result):
+                                with patch.object(bluez, "read_device_state", return_value=unpaired_state):
+                                    with pytest.raises(RuntimeError, match="BlueZ pair failed for AA:BB"):
+                                        await bluez.assist_connection("AA:BB")
 
     asyncio.run(run())
 
@@ -610,6 +630,10 @@ def test_assist_connection_retries_transient_pair_failure_before_succeeding() ->
             events.append(("bluez", "trust", address, trusted))
             return trust_result
 
+        async def fake_refresh_visible_device(address: str) -> bluez.BluezState:
+            events.append(("preflight_device", address))
+            return unpaired_state
+
         async def fake_run_command(argv: list[str], timeout: float = 15.0) -> CompletedProcess[str]:
             events.append(tuple(argv))
             results = {
@@ -625,16 +649,17 @@ def test_assist_connection_retries_transient_pair_failure_before_succeeding() ->
                     "bluez_prepare_phone_like_pairing_controller",
                     side_effect=fake_prepare_controller,
                 ):
-                    with patch.object(bluez, "bluez_set_pairable", side_effect=fake_set_pairable):
-                        with patch.object(bluez, "bluez_pair_device", side_effect=fake_pair_device):
-                            with patch.object(bluez, "bluez_set_trusted", side_effect=fake_set_trusted):
-                                with patch.object(
-                                    bluez,
-                                    "read_device_state",
-                                    side_effect=[unpaired_state, connected_state],
-                                ):
-                                    with patch.object(bluez.asyncio, "sleep", new=AsyncMock()) as sleep_mock:
-                                        result = await bluez.assist_connection("AA:BB")
+                    with patch.object(bluez, "refresh_visible_device", side_effect=fake_refresh_visible_device):
+                        with patch.object(bluez, "bluez_set_pairable", side_effect=fake_set_pairable):
+                            with patch.object(bluez, "bluez_pair_device", side_effect=fake_pair_device):
+                                with patch.object(bluez, "bluez_set_trusted", side_effect=fake_set_trusted):
+                                    with patch.object(
+                                        bluez,
+                                        "read_device_state",
+                                        side_effect=[unpaired_state, connected_state],
+                                    ):
+                                        with patch.object(bluez.asyncio, "sleep", new=AsyncMock()) as sleep_mock:
+                                            result = await bluez.assist_connection("AA:BB")
 
         assert result is connected_state
         sleep_mock.assert_awaited_once()
@@ -644,9 +669,11 @@ def test_assist_connection_retries_transient_pair_failure_before_succeeding() ->
         ("bluetoothctl", "info", "AA:BB"),
         ("btmgmt", "prepare-phone-like-controller", False),
         ("bluetoothctl", "pairable", True),
+        ("preflight_device", "AA:BB"),
         ("bluez", "pair", "AA:BB"),
         ("btmgmt", "prepare-phone-like-controller", False),
         ("bluetoothctl", "pairable", True),
+        ("preflight_device", "AA:BB"),
         ("bluez", "pair", "AA:BB"),
         ("bluez", "trust", "AA:BB", True),
         ("bluetoothctl", "connect", "AA:BB"),
@@ -718,6 +745,10 @@ def test_assist_connection_refreshes_device_when_bluetoothctl_info_is_unavailabl
             events.append(("bluez", "trust", address, trusted))
             return trust_result
 
+        async def fake_refresh_visible_device(address: str) -> bluez.BluezState:
+            events.append(("preflight_device", address))
+            return refreshed_state
+
         with patch.object(bluez, "run_command_async", side_effect=fake_run_command):
             with patch.object(bluez, "pairing_agent", side_effect=fake_pairing_agent):
                 with patch.object(bluez, "preflight_device", new=AsyncMock(return_value=refreshed_state)) as preflight_mock:
@@ -726,23 +757,74 @@ def test_assist_connection_refreshes_device_when_bluetoothctl_info_is_unavailabl
                         "bluez_prepare_phone_like_pairing_controller",
                         side_effect=fake_prepare_controller,
                     ):
-                        with patch.object(bluez, "bluez_set_pairable", side_effect=fake_set_pairable):
-                            with patch.object(bluez, "bluez_pair_device", side_effect=fake_pair_device):
-                                with patch.object(bluez, "bluez_set_trusted", side_effect=fake_set_trusted):
-                                    with patch.object(bluez, "read_device_state", return_value=connected_state):
-                                        result = await bluez.assist_connection("AA:BB")
+                        with patch.object(bluez, "refresh_visible_device", side_effect=fake_refresh_visible_device) as refresh_mock:
+                            with patch.object(bluez, "bluez_set_pairable", side_effect=fake_set_pairable):
+                                with patch.object(bluez, "bluez_pair_device", side_effect=fake_pair_device):
+                                    with patch.object(bluez, "bluez_set_trusted", side_effect=fake_set_trusted):
+                                        with patch.object(bluez, "read_device_state", return_value=connected_state):
+                                            result = await bluez.assist_connection("AA:BB")
 
         assert result is connected_state
         preflight_mock.assert_awaited_once_with("AA:BB", scan_timeout=bluez.DEFAULT_SCAN_TIMEOUT)
+        refresh_mock.assert_awaited_once_with("AA:BB")
 
     asyncio.run(run())
     assert events == [
         ("bluetoothctl", "info", "AA:BB"),
         ("btmgmt", "prepare-phone-like-controller", False),
         ("bluetoothctl", "pairable", True),
+        ("preflight_device", "AA:BB"),
         ("bluez", "pair", "AA:BB"),
         ("bluez", "trust", "AA:BB", True),
         ("bluetoothctl", "connect", "AA:BB"),
+    ]
+
+
+def test_assist_connection_rescans_after_controller_prepare_before_pairing() -> None:
+    events: list[object] = []
+    info_result = CompletedProcess(["bluetoothctl", "info", "AA:BB"], 0, stdout="", stderr="")
+    pairable_result = CompletedProcess(["bluetoothctl", "pairable", "on"], 0, stdout="", stderr="")
+    pair_result = CompletedProcess(["bluez", "pair", "AA:BB"], 1, stdout="", stderr="Authentication Canceled\n")
+    unpaired_state = bluez.BluezState(
+        address="AA:BB",
+        visible=True,
+        device=None,
+        name="sensor",
+        paired=False,
+        trusted=False,
+        connected=False,
+        services_resolved=None,
+        bluetoothctl=CompletedProcess(["bluetoothctl"], 0, stdout="Paired: no\n", stderr=""),
+        busctl=None,
+    )
+
+    @asynccontextmanager
+    async def fake_pairing_agent(_address: str):
+        yield
+
+    async def run() -> None:
+        with patch.object(bluez, "run_command_async", side_effect=[info_result]):
+            with patch.object(bluez, "pairing_agent", side_effect=fake_pairing_agent):
+                with patch.object(bluez, "bluez_prepare_phone_like_pairing_controller", new=AsyncMock()):
+                    with patch.object(bluez, "bluez_set_pairable", return_value=pairable_result):
+                        with patch.object(
+                            bluez,
+                            "refresh_visible_device",
+                            side_effect=lambda address: events.append(("preflight_device", address)) or unpaired_state,
+                        ):
+                            with patch.object(
+                                bluez,
+                                "bluez_pair_device",
+                                side_effect=lambda address: events.append(("bluez", "pair", address)) or pair_result,
+                            ):
+                                with patch.object(bluez, "read_device_state", return_value=unpaired_state):
+                                    with pytest.raises(RuntimeError, match="BlueZ pair failed for AA:BB"):
+                                        await bluez.assist_connection("AA:BB")
+
+    asyncio.run(run())
+    assert events == [
+        ("preflight_device", "AA:BB"),
+        ("bluez", "pair", "AA:BB"),
     ]
 
 
@@ -781,12 +863,13 @@ def test_assist_connection_fails_after_exhausting_transient_pair_retries() -> No
         with patch.object(bluez, "run_command_async", side_effect=[info_result]):
             with patch.object(bluez, "pairing_agent", side_effect=fake_pairing_agent):
                 with patch.object(bluez, "bluez_prepare_phone_like_pairing_controller", new=AsyncMock()):
-                    with patch.object(bluez, "bluez_set_pairable", return_value=pairable_result):
-                        with patch.object(bluez, "bluez_pair_device", return_value=transient_pair_result):
-                            with patch.object(bluez, "read_device_state", return_value=unpaired_state):
-                                with patch.object(bluez.asyncio, "sleep", new=AsyncMock()) as sleep_mock:
-                                    with pytest.raises(RuntimeError, match="BlueZ pair failed for AA:BB: Connection Failed to be Established"):
-                                        await bluez.assist_connection("AA:BB")
+                    with patch.object(bluez, "refresh_visible_device", new=AsyncMock(return_value=unpaired_state)):
+                        with patch.object(bluez, "bluez_set_pairable", return_value=pairable_result):
+                            with patch.object(bluez, "bluez_pair_device", return_value=transient_pair_result):
+                                with patch.object(bluez, "read_device_state", return_value=unpaired_state):
+                                    with patch.object(bluez.asyncio, "sleep", new=AsyncMock()) as sleep_mock:
+                                        with pytest.raises(RuntimeError, match="BlueZ pair failed for AA:BB: Connection Failed to be Established"):
+                                            await bluez.assist_connection("AA:BB")
 
         assert sleep_mock.await_count == 2
 
@@ -939,10 +1022,11 @@ def test_assist_connection_uses_btmgmt_pair_backend() -> None:
             with patch.object(bluez, "bluez_prepare_phone_like_pairing_controller", new=AsyncMock()):
                 with patch.object(bluez, "bluez_set_pairable", return_value=pairable_result):
                     with patch.object(bluez, "btmgmt_pair_device", return_value=pair_result) as pair_mock:
-                        with patch.object(bluez, "bluez_set_trusted", return_value=trust_result):
-                            with patch.object(bluez, "pairing_agent", side_effect=fake_pairing_agent):
-                                with patch.object(bluez, "read_device_state", return_value=connected_state):
-                                    result = await bluez.assist_connection("AA:BB", pair_backend="btmgmt")
+                        with patch.object(bluez, "refresh_visible_device", new=AsyncMock(return_value=connected_state)):
+                            with patch.object(bluez, "bluez_set_trusted", return_value=trust_result):
+                                with patch.object(bluez, "pairing_agent", side_effect=fake_pairing_agent):
+                                    with patch.object(bluez, "read_device_state", return_value=connected_state):
+                                        result = await bluez.assist_connection("AA:BB", pair_backend="btmgmt")
 
         assert result is connected_state
         pair_mock.assert_awaited_once_with("AA:BB")
@@ -1377,6 +1461,10 @@ def test_connect_device_connects_without_pairing() -> None:
         async def fake_prepare_controller(*, privacy: bool = False) -> None:
             events.append(("btmgmt", "prepare-phone-like-controller", privacy))
 
+        async def fake_refresh_visible_device(address: str) -> bluez.BluezState:
+            events.append(("preflight_device", address))
+            return connected_state
+
         with patch.object(bluez, "run_command_async", side_effect=fake_run_command):
             with patch.object(
                 bluez,
@@ -1384,8 +1472,9 @@ def test_connect_device_connects_without_pairing() -> None:
                 side_effect=fake_prepare_controller,
             ):
                 with patch.object(bluez, "bluez_set_pairable", side_effect=fake_set_pairable):
-                    with patch.object(bluez, "read_device_state", return_value=connected_state):
-                        state = await bluez.connect_device("AA:BB")
+                    with patch.object(bluez, "refresh_visible_device", side_effect=fake_refresh_visible_device):
+                        with patch.object(bluez, "read_device_state", return_value=connected_state):
+                            state = await bluez.connect_device("AA:BB")
 
         assert state.address == "AA:BB"
         assert state.connected is True
@@ -1396,6 +1485,7 @@ def test_connect_device_connects_without_pairing() -> None:
         ("bluetoothctl", "info", "AA:BB"),
         ("btmgmt", "prepare-phone-like-controller", False),
         ("bluetoothctl", "pairable", True),
+        ("preflight_device", "AA:BB"),
         ("bluetoothctl", "connect", "AA:BB"),
     ]
 
