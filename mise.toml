@@ -33,3 +33,6 @@ run = "./scripts/bluetoothd-debug-tail"
 
 [tasks.manual-connect-after-load-conn]
 run = "./scripts/manual-connect-after-load-conn"
+
+[tasks.manual-connect-after-load-conn-host]
+run = "./scripts/manual-connect-after-load-conn-host"
