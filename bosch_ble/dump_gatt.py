@@ -115,7 +115,7 @@ async def resolve_device(address: str) -> bluez.BluezState:
 
 async def prepare_connection(address: str) -> bluez.BluezState:
     state = await resolve_device(address)
-    connected_state = await bluez.assist_connection(address)
+    connected_state = await bluez.connect_device(address)
     return bluez.BluezState(
         address=connected_state.address,
         visible=connected_state.visible,

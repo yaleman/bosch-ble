@@ -415,7 +415,7 @@ def test_assist_connection_runs_pair_trust_connect_inside_pairing_agent() -> Non
             events.append(("bluetoothctl", "pairable", pairable))
             return pairable_result
 
-        async def fake_prepare_controller(*, privacy: bool = True) -> None:
+        async def fake_prepare_controller(*, privacy: bool = False) -> None:
             events.append(("btmgmt", "prepare-phone-like-controller", privacy))
 
         with patch.object(bluez, "pairing_agent", side_effect=fake_pairing_agent):
@@ -437,7 +437,7 @@ def test_assist_connection_runs_pair_trust_connect_inside_pairing_agent() -> Non
     assert events == [
         ("bluetoothctl", "info", "AA:BB"),
         ("agent_enter", "AA:BB"),
-        ("btmgmt", "prepare-phone-like-controller", True),
+        ("btmgmt", "prepare-phone-like-controller", False),
         ("bluetoothctl", "pairable", True),
         ("bluez", "pair", "AA:BB"),
         ("bluez", "trust", "AA:BB", True),
@@ -597,7 +597,7 @@ def test_assist_connection_retries_transient_pair_failure_before_succeeding() ->
             events.append(("bluetoothctl", "pairable", pairable))
             return pairable_result
 
-        async def fake_prepare_controller(*, privacy: bool = True) -> None:
+        async def fake_prepare_controller(*, privacy: bool = False) -> None:
             events.append(("btmgmt", "prepare-phone-like-controller", privacy))
 
         async def fake_pair_device(address: str) -> CompletedProcess[str]:
@@ -642,10 +642,10 @@ def test_assist_connection_retries_transient_pair_failure_before_succeeding() ->
     asyncio.run(run())
     assert events == [
         ("bluetoothctl", "info", "AA:BB"),
-        ("btmgmt", "prepare-phone-like-controller", True),
+        ("btmgmt", "prepare-phone-like-controller", False),
         ("bluetoothctl", "pairable", True),
         ("bluez", "pair", "AA:BB"),
-        ("btmgmt", "prepare-phone-like-controller", True),
+        ("btmgmt", "prepare-phone-like-controller", False),
         ("bluetoothctl", "pairable", True),
         ("bluez", "pair", "AA:BB"),
         ("bluez", "trust", "AA:BB", True),
@@ -707,7 +707,7 @@ def test_assist_connection_refreshes_device_when_bluetoothctl_info_is_unavailabl
             events.append(("bluetoothctl", "pairable", pairable))
             return pairable_result
 
-        async def fake_prepare_controller(*, privacy: bool = True) -> None:
+        async def fake_prepare_controller(*, privacy: bool = False) -> None:
             events.append(("btmgmt", "prepare-phone-like-controller", privacy))
 
         async def fake_pair_device(address: str) -> CompletedProcess[str]:
@@ -738,7 +738,7 @@ def test_assist_connection_refreshes_device_when_bluetoothctl_info_is_unavailabl
     asyncio.run(run())
     assert events == [
         ("bluetoothctl", "info", "AA:BB"),
-        ("btmgmt", "prepare-phone-like-controller", True),
+        ("btmgmt", "prepare-phone-like-controller", False),
         ("bluetoothctl", "pairable", True),
         ("bluez", "pair", "AA:BB"),
         ("bluez", "trust", "AA:BB", True),
@@ -843,7 +843,7 @@ def test_prepare_phone_like_pairing_controller_runs_expected_btmgmt_sequence() -
             "0019:2:0000",
             "001a:2:4800",
         ),
-        ("sudo", "btmgmt", "privacy", "on"),
+        ("sudo", "btmgmt", "privacy", "off"),
         ("sudo", "btmgmt", "bondable", "on"),
         ("sudo", "btmgmt", "power", "on"),
     ]
@@ -991,17 +991,17 @@ def test_bluez_diagnose_pair_cli_runs_all_attempts(
     assert diag_mock.await_count == 4
     calls = [(call.args, call.kwargs) for call in diag_mock.await_args_list]
     assert calls == [
-        (("AA:BB",), {"pair_backend": "dbus", "privacy": True}),
         (("AA:BB",), {"pair_backend": "dbus", "privacy": False}),
-        (("AA:BB",), {"pair_backend": "btmgmt", "privacy": True}),
+        (("AA:BB",), {"pair_backend": "dbus", "privacy": True}),
         (("AA:BB",), {"pair_backend": "btmgmt", "privacy": False}),
+        (("AA:BB",), {"pair_backend": "btmgmt", "privacy": True}),
     ]
     output = capsys.readouterr().out
-    assert "attempt backend=dbus privacy=device" in output
+    assert "attempt backend=dbus privacy=off" in output
     assert "attempt backend=btmgmt privacy=off" in output
     assert "HighestStage: remote_features" in output
 
-def test_dump_gatt_main_runs_preflight_and_assisted_connect_before_bleak_client(
+def test_dump_gatt_main_runs_preflight_and_connect_only_before_bleak_client(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     class FakeClient:
@@ -1053,8 +1053,8 @@ def test_dump_gatt_main_runs_preflight_and_assisted_connect_before_bleak_client(
         ):
             with patch.object(
                 dump_gatt.bluez,
-                "assist_connection",
-                new=AsyncMock(side_effect=lambda address: call_order.append(("assist_connection", address)) or connected_state),
+                "connect_device",
+                new=AsyncMock(side_effect=lambda address: call_order.append(("connect_device", address)) or connected_state),
             ):
                 with patch.object(dump_gatt, "BleakClient", FakeClient):
                     await dump_gatt.main("AA:BB")
@@ -1063,7 +1063,7 @@ def test_dump_gatt_main_runs_preflight_and_assisted_connect_before_bleak_client(
     assert "Connecting to AA:BB ..." in capsys.readouterr().out
     assert call_order == [
         ("preflight", "AA:BB"),
-        ("assist_connection", "AA:BB"),
+        ("connect_device", "AA:BB"),
         ("bleak_client", fake_device),
     ]
 
@@ -1119,7 +1119,7 @@ def test_dump_gatt_main_can_connect_by_address_when_scan_cannot_find_device(
         ):
             with patch.object(
                 dump_gatt.bluez,
-                "assist_connection",
+                "connect_device",
                 new=AsyncMock(return_value=connected_state),
             ):
                 with patch.object(dump_gatt, "BleakClient", FakeClient):
@@ -1170,7 +1170,7 @@ def test_dump_gatt_main_uses_bluez_device_path_when_connected_but_not_visible(
         ):
             with patch.object(
                 dump_gatt.bluez,
-                "assist_connection",
+                "connect_device",
                 new=AsyncMock(return_value=missing_state),
             ):
                 with patch.object(
@@ -1243,7 +1243,7 @@ def test_dump_gatt_main_skips_wait_when_service_resolution_is_unavailable(
             with patch("bosch_ble.bluez.shutil.which", return_value=None):
                 with patch.object(
                     dump_gatt.bluez,
-                    "assist_connection",
+                    "connect_device",
                     new=AsyncMock(return_value=connected_state),
                 ):
                     with patch.object(
@@ -1296,7 +1296,7 @@ def test_dump_gatt_main_retries_when_service_discovery_disconnects(
             busctl=CompletedProcess(["busctl"], 0, stdout="", stderr=""),
         )
         with patch.object(dump_gatt.bluez, "preflight_device", new=AsyncMock(return_value=ready_state)):
-            with patch.object(dump_gatt.bluez, "assist_connection", new=AsyncMock(return_value=ready_state)):
+            with patch.object(dump_gatt.bluez, "connect_device", new=AsyncMock(return_value=ready_state)):
                 with patch.object(dump_gatt.bluez, "wait_for_services", new=AsyncMock(return_value=ready_state)):
                     with patch.object(dump_gatt, "BleakClient", FakeClient):
                         await dump_gatt.main("AA:BB")
@@ -1333,7 +1333,7 @@ def test_prepare_connection_accepts_connected_state_when_services_do_not_resolve
             busctl=CompletedProcess(["busctl"], 0, stdout="", stderr=""),
         )
         with patch.object(dump_gatt, "resolve_device", new=AsyncMock(return_value=preflight_state)):
-            with patch.object(dump_gatt.bluez, "assist_connection", new=AsyncMock(return_value=connected_state)):
+            with patch.object(dump_gatt.bluez, "connect_device", new=AsyncMock(return_value=connected_state)):
                 state = await dump_gatt.prepare_connection("AA:BB")
 
         assert state.address == "AA:BB"
@@ -1341,6 +1341,63 @@ def test_prepare_connection_accepts_connected_state_when_services_do_not_resolve
         assert state.services_resolved is False
 
     asyncio.run(run())
+
+
+def test_connect_device_connects_without_pairing() -> None:
+    events: list[object] = []
+    info_result = CompletedProcess(["bluetoothctl", "info", "AA:BB"], 0, stdout="", stderr="")
+    pairable_result = CompletedProcess(["bluetoothctl", "pairable", "on"], 0, stdout="", stderr="")
+    connect_result = CompletedProcess(["bluetoothctl", "connect", "AA:BB"], 0, stdout="Connected: yes\n", stderr="")
+    connected_state = bluez.BluezState(
+        address="AA:BB",
+        visible=True,
+        device=None,
+        name="sensor",
+        paired=False,
+        trusted=False,
+        connected=True,
+        services_resolved=False,
+        bluetoothctl=CompletedProcess(["bluetoothctl"], 0, stdout="Connected: yes\n", stderr=""),
+        busctl=CompletedProcess(["busctl"], 0, stdout="", stderr=""),
+    )
+
+    async def run() -> None:
+        async def fake_run_command(argv: list[str], timeout: float = 15.0) -> CompletedProcess[str]:
+            events.append(tuple(argv))
+            results = {
+                ("bluetoothctl", "info", "AA:BB"): info_result,
+                ("bluetoothctl", "connect", "AA:BB"): connect_result,
+            }
+            return results[tuple(argv)]
+
+        async def fake_set_pairable(pairable: bool = True) -> CompletedProcess[str]:
+            events.append(("bluetoothctl", "pairable", pairable))
+            return pairable_result
+
+        async def fake_prepare_controller(*, privacy: bool = False) -> None:
+            events.append(("btmgmt", "prepare-phone-like-controller", privacy))
+
+        with patch.object(bluez, "run_command_async", side_effect=fake_run_command):
+            with patch.object(
+                bluez,
+                "bluez_prepare_phone_like_pairing_controller",
+                side_effect=fake_prepare_controller,
+            ):
+                with patch.object(bluez, "bluez_set_pairable", side_effect=fake_set_pairable):
+                    with patch.object(bluez, "read_device_state", return_value=connected_state):
+                        state = await bluez.connect_device("AA:BB")
+
+        assert state.address == "AA:BB"
+        assert state.connected is True
+        assert state.name == "sensor"
+
+    asyncio.run(run())
+    assert events == [
+        ("bluetoothctl", "info", "AA:BB"),
+        ("btmgmt", "prepare-phone-like-controller", False),
+        ("bluetoothctl", "pairable", True),
+        ("bluetoothctl", "connect", "AA:BB"),
+    ]
 
 
 def test_log_chars_main_uses_dump_gatt_client_target_for_state(
@@ -1549,7 +1606,7 @@ def test_dump_gatt_main_retries_when_bluez_reports_operation_in_progress(
             busctl=CompletedProcess(["busctl"], 0, stdout="", stderr=""),
         )
         with patch.object(dump_gatt.bluez, "preflight_device", new=AsyncMock(return_value=ready_state)):
-            with patch.object(dump_gatt.bluez, "assist_connection", new=AsyncMock(return_value=ready_state)):
+            with patch.object(dump_gatt.bluez, "connect_device", new=AsyncMock(return_value=ready_state)):
                 with patch.object(dump_gatt.bluez, "wait_for_services", new=AsyncMock(return_value=ready_state)):
                     with patch.object(dump_gatt, "BleakClient", FakeClient):
                         await dump_gatt.main("AA:BB")
@@ -1577,7 +1634,7 @@ def test_dump_gatt_main_fails_cleanly_when_bluez_connect_fails() -> None:
         with patch.object(dump_gatt.bluez, "preflight_device", new=AsyncMock(return_value=preflight_state)):
             with patch.object(
                 dump_gatt.bluez,
-                "assist_connection",
+                "connect_device",
                 new=AsyncMock(side_effect=RuntimeError("BlueZ connect failed for AA:BB: le-connection-abort-by-local")),
             ):
                 with pytest.raises(RuntimeError) as excinfo:
@@ -1615,7 +1672,7 @@ def test_dump_gatt_main_fails_when_bleak_service_discovery_disconnects() -> None
             busctl=CompletedProcess(["busctl"], 0, stdout="", stderr=""),
         )
         with patch.object(dump_gatt.bluez, "preflight_device", new=AsyncMock(return_value=preflight_state)):
-            with patch.object(dump_gatt.bluez, "assist_connection", new=AsyncMock(return_value=connected_state)):
+            with patch.object(dump_gatt.bluez, "connect_device", new=AsyncMock(return_value=connected_state)):
                 with patch.object(dump_gatt, "BleakClient", side_effect=RuntimeError("failed to discover services, device disconnected")):
                     with pytest.raises(RuntimeError) as excinfo:
                         await dump_gatt.main("AA:BB")

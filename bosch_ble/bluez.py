@@ -658,7 +658,7 @@ async def bluez_set_bondable(bondable: bool = True) -> subprocess.CompletedProce
     return await run_command_async(["sudo", "btmgmt", "bondable", value])
 
 
-async def bluez_prepare_phone_like_pairing_controller(*, privacy: bool = True) -> None:
+async def bluez_prepare_phone_like_pairing_controller(*, privacy: bool = False) -> None:
     steps = [
         ("power off", lambda: bluez_set_power(False)),
         (
@@ -681,7 +681,7 @@ async def assist_connection(
     verbose: bool = False,
     *,
     pair_backend: Literal["dbus", "btmgmt"] = "dbus",
-    privacy: bool = True,
+    privacy: bool = False,
 ) -> BluezState:
     info_result = await run_command_async(["bluetoothctl", "info", address])
     info_state = build_state(address, info_result, None)
@@ -746,6 +746,51 @@ async def assist_connection(
     if state.connected is False:
         raise RuntimeError(f"BlueZ reports {address} is not connected after connect attempt.")
     return state
+
+
+async def connect_device(
+    address: str,
+    verbose: bool = False,
+    *,
+    privacy: bool = False,
+) -> BluezState:
+    info_result = await run_command_async(["bluetoothctl", "info", address])
+    info_state = build_state(address, info_result, None)
+    if is_device_unavailable(info_result):
+        info_state = await preflight_device(address, scan_timeout=DEFAULT_SCAN_TIMEOUT)
+
+    await bluez_prepare_phone_like_pairing_controller(privacy=privacy)
+    pairable_result = await bluez_set_pairable(True)
+    if verbose:
+        print_section("bluetoothctl pairable on", pairable_result)
+
+    connect_result = await run_command_async(["bluetoothctl", "connect", address])
+    if verbose:
+        print_section("bluetoothctl connect", connect_result)
+
+    state = await asyncio.to_thread(read_device_state, address)
+    if verbose:
+        print_section("bluetoothctl info", state.bluetoothctl)
+        if state.busctl is not None:
+            print_section("busctl introspect", state.busctl)
+
+    if connect_result.returncode != 0 and state.connected is not True:
+        raise RuntimeError(f"BlueZ connect failed for {address}: {summarize_failure(connect_result)}")
+    if state.connected is False:
+        raise RuntimeError(f"BlueZ reports {address} is not connected after connect attempt.")
+
+    return BluezState(
+        address=state.address,
+        visible=info_state.visible if info_state.visible is not None else state.visible,
+        device=info_state.device,
+        name=info_state.name or state.name,
+        paired=state.paired,
+        trusted=state.trusted,
+        connected=state.connected,
+        services_resolved=state.services_resolved,
+        bluetoothctl=state.bluetoothctl,
+        busctl=state.busctl,
+    )
 
 
 async def wait_for_services(
@@ -945,10 +990,10 @@ def diagnose_pair_cli() -> None:
 
     address = sys.argv[1]
     attempts = [
-        ("dbus", True),
         ("dbus", False),
-        ("btmgmt", True),
+        ("dbus", True),
         ("btmgmt", False),
+        ("btmgmt", True),
     ]
 
     try:
