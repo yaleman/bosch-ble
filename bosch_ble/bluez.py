@@ -42,6 +42,12 @@ BUSY_PROCESS_PATTERNS = (
     "bluetoothctl pair",
     "bluetoothctl trust",
 )
+PHONE_LIKE_LE_CONNECTION_SYS_CONFIG = (
+    "0017:2:1800",  # min interval 30 ms
+    "0018:2:1800",  # max interval 30 ms
+    "0019:2:0000",  # latency 0
+    "001a:2:4800",  # supervision timeout 720 ms
+)
 
 
 def log_agent_event(message: str) -> None:
@@ -529,9 +535,37 @@ async def bluez_set_pairable(pairable: bool = True) -> subprocess.CompletedProce
     return await run_command_async(["bluetoothctl", "pairable", value])
 
 
+async def bluez_set_power(powered: bool = True) -> subprocess.CompletedProcess[str]:
+    value = "on" if powered else "off"
+    return await run_command_async(["sudo", "btmgmt", "power", value])
+
+
+async def bluez_set_privacy(privacy: bool = True) -> subprocess.CompletedProcess[str]:
+    value = "on" if privacy else "off"
+    return await run_command_async(["sudo", "btmgmt", "privacy", value])
+
+
 async def bluez_set_bondable(bondable: bool = True) -> subprocess.CompletedProcess[str]:
     value = "on" if bondable else "off"
     return await run_command_async(["sudo", "btmgmt", "bondable", value])
+
+
+async def bluez_prepare_phone_like_pairing_controller() -> None:
+    steps = [
+        ("power off", lambda: bluez_set_power(False)),
+        (
+            "set-sysconfig",
+            lambda: run_command_async(["sudo", "btmgmt", "set-sysconfig", "-v", *PHONE_LIKE_LE_CONNECTION_SYS_CONFIG]),
+        ),
+        ("privacy", lambda: bluez_set_privacy(True)),
+        ("bondable", lambda: bluez_set_bondable(True)),
+        ("power on", lambda: bluez_set_power(True)),
+    ]
+
+    for label, command_factory in steps:
+        result = await command_factory()
+        if result.returncode != 0:
+            raise RuntimeError(f"BlueZ {label} failed: {summarize_failure(result)}")
 
 
 async def assist_connection(address: str, verbose: bool = False) -> BluezState:
@@ -548,11 +582,7 @@ async def assist_connection(address: str, verbose: bool = False) -> BluezState:
         if info_state.paired is not True:
             last_pair_result: subprocess.CompletedProcess[str] | None = None
             for attempt in range(3):
-                bondable_result = await bluez_set_bondable(True)
-                if verbose:
-                    print_section("sudo btmgmt bondable on", bondable_result)
-                if bondable_result.returncode != 0:
-                    raise RuntimeError(f"BlueZ bondable failed for {address}: {summarize_failure(bondable_result)}")
+                await bluez_prepare_phone_like_pairing_controller()
 
                 pairable_result = await bluez_set_pairable(True)
                 if verbose:
