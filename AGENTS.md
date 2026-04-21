@@ -19,6 +19,7 @@
 - Use package managers for dependency changes.
 - If JavaScript tooling appears, prefer `pnpm`.
 - The remote dev box worktree may be overwritten freely when needed; do not preserve or tiptoe around remote-only changes there.
+- Load `REMOTE_HOST` from the local shell environment via `direnv` before using host-helper scripts or SSH-based workflows.
 - The bike often turns off or stops advertising between attempts.
 - Before diagnosing protocol or pairing failures, confirm the bike is awake and visible to BlueZ.
 - Treat `Visible: no`, scan misses, and `Device ... not available` as bike-state failures first.
