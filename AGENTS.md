@@ -24,6 +24,11 @@
 - Before diagnosing protocol or pairing failures, confirm the bike is awake and visible to BlueZ.
 - Treat `Visible: no`, scan misses, and `Device ... not available` as bike-state failures first.
 - Only use runs with confirmed advertisement visibility as evidence for pairing or protocol conclusions.
+- Record meaningful investigation results in timestamped markdown files under `findings/`.
+- Write findings like a scientific lab notebook entry: state the hypothesis, setup, observations, result, and conclusion.
+- Prefer filenames like `findings/2026-04-21T18-05-00-privacy-off-connect.md` so later work can sort and reference them easily.
+- When proposing a plan or evaluating an idea, review the relevant `findings/` notes first and use them as evidence for or against the next step.
+- If a new live run invalidates an older conclusion, add a new finding that supersedes it instead of silently overwriting history.
 - When you finish a request, commit and push the changes.
 
 ## Output Guidance
