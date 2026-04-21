@@ -651,6 +651,97 @@ def test_assist_connection_retries_transient_pair_failure_before_succeeding() ->
     ]
 
 
+def test_assist_connection_refreshes_device_when_bluetoothctl_info_is_unavailable() -> None:
+    events: list[object] = []
+    unavailable_info_result = CompletedProcess(
+        ["bluetoothctl", "info", "AA:BB"],
+        0,
+        stdout="Device AA:BB not available\n",
+        stderr="DeviceSet AA:BB not available\n",
+    )
+    bondable_result = CompletedProcess(["sudo", "btmgmt", "bondable", "on"], 0, stdout="", stderr="")
+    pairable_result = CompletedProcess(["bluetoothctl", "pairable", "on"], 0, stdout="", stderr="")
+    pair_result = CompletedProcess(["bluez", "pair", "AA:BB"], 0, stdout="", stderr="")
+    trust_result = CompletedProcess(["bluez", "trust", "AA:BB"], 0, stdout="", stderr="")
+    connect_result = CompletedProcess(["bluetoothctl", "connect", "AA:BB"], 0, stdout="Connected: yes\n", stderr="")
+    refreshed_state = bluez.BluezState(
+        address="AA:BB",
+        visible=True,
+        device=object(),
+        name="sensor",
+        paired=False,
+        trusted=False,
+        connected=False,
+        services_resolved=False,
+        bluetoothctl=CompletedProcess(["bluetoothctl"], 0, stdout="Name: sensor\nPaired: no\n", stderr=""),
+        busctl=CompletedProcess(["busctl"], 0, stdout="ServicesResolved no\n", stderr=""),
+    )
+    connected_state = bluez.BluezState(
+        address="AA:BB",
+        visible=True,
+        device=refreshed_state.device,
+        name="sensor",
+        paired=True,
+        trusted=True,
+        connected=True,
+        services_resolved=None,
+        bluetoothctl=CompletedProcess(["bluetoothctl"], 0, stdout="Paired: yes\nConnected: yes\n", stderr=""),
+        busctl=None,
+    )
+
+    @asynccontextmanager
+    async def fake_pairing_agent(_address: str):
+        yield
+
+    async def run() -> None:
+        async def fake_run_command(argv: list[str], timeout: float = 15.0) -> CompletedProcess[str]:
+            events.append(tuple(argv))
+            results = {
+                ("bluetoothctl", "info", "AA:BB"): unavailable_info_result,
+                ("bluetoothctl", "connect", "AA:BB"): connect_result,
+            }
+            return results[tuple(argv)]
+
+        async def fake_set_bondable(bondable: bool = True) -> CompletedProcess[str]:
+            events.append(("btmgmt", "bondable", bondable))
+            return bondable_result
+
+        async def fake_set_pairable(pairable: bool = True) -> CompletedProcess[str]:
+            events.append(("bluetoothctl", "pairable", pairable))
+            return pairable_result
+
+        async def fake_pair_device(address: str) -> CompletedProcess[str]:
+            events.append(("bluez", "pair", address))
+            return pair_result
+
+        async def fake_set_trusted(address: str, trusted: bool = True) -> CompletedProcess[str]:
+            events.append(("bluez", "trust", address, trusted))
+            return trust_result
+
+        with patch.object(bluez, "run_command_async", side_effect=fake_run_command):
+            with patch.object(bluez, "pairing_agent", side_effect=fake_pairing_agent):
+                with patch.object(bluez, "preflight_device", new=AsyncMock(return_value=refreshed_state)) as preflight_mock:
+                    with patch.object(bluez, "bluez_set_bondable", side_effect=fake_set_bondable):
+                        with patch.object(bluez, "bluez_set_pairable", side_effect=fake_set_pairable):
+                            with patch.object(bluez, "bluez_pair_device", side_effect=fake_pair_device):
+                                with patch.object(bluez, "bluez_set_trusted", side_effect=fake_set_trusted):
+                                    with patch.object(bluez, "read_device_state", return_value=connected_state):
+                                        result = await bluez.assist_connection("AA:BB")
+
+        assert result is connected_state
+        preflight_mock.assert_awaited_once_with("AA:BB", scan_timeout=bluez.DEFAULT_SCAN_TIMEOUT)
+
+    asyncio.run(run())
+    assert events == [
+        ("bluetoothctl", "info", "AA:BB"),
+        ("btmgmt", "bondable", True),
+        ("bluetoothctl", "pairable", True),
+        ("bluez", "pair", "AA:BB"),
+        ("bluez", "trust", "AA:BB", True),
+        ("bluetoothctl", "connect", "AA:BB"),
+    ]
+
+
 def test_assist_connection_fails_after_exhausting_transient_pair_retries() -> None:
     info_result = CompletedProcess(
         ["bluetoothctl", "info", "AA:BB"],

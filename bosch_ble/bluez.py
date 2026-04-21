@@ -275,6 +275,11 @@ def is_transient_pair_failure(result: subprocess.CompletedProcess[str]) -> bool:
     )
 
 
+def is_device_unavailable(result: subprocess.CompletedProcess[str]) -> bool:
+    text = "\n".join(part for part in (result.stdout, result.stderr) if part).lower()
+    return "not available" in text
+
+
 def controller_show() -> subprocess.CompletedProcess[str]:
     try:
         return run_command(["bluetoothctl", "show"])
@@ -532,6 +537,9 @@ async def bluez_set_bondable(bondable: bool = True) -> subprocess.CompletedProce
 async def assist_connection(address: str, verbose: bool = False) -> BluezState:
     info_result = await run_command_async(["bluetoothctl", "info", address])
     info_state = build_state(address, info_result, None)
+    if is_device_unavailable(info_result):
+        info_state = await preflight_device(address, scan_timeout=DEFAULT_SCAN_TIMEOUT)
+        info_result = info_state.bluetoothctl
     connect_result: subprocess.CompletedProcess[str] | None = None
     async with pairing_agent(address):
         if verbose:
