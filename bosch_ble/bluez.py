@@ -262,6 +262,19 @@ def summarize_failure(result: subprocess.CompletedProcess[str]) -> str:
     return f"exit code {result.returncode}"
 
 
+def is_transient_pair_failure(result: subprocess.CompletedProcess[str]) -> bool:
+    text = "\n".join(part for part in (result.stderr, result.stdout) if part).lower()
+    return any(
+        marker in text
+        for marker in (
+            "page timeout",
+            "connect failed",
+            "connection failed to be established",
+            "le-connection-abort-by-local",
+        )
+    )
+
+
 def controller_show() -> subprocess.CompletedProcess[str]:
     try:
         return run_command(["bluetoothctl", "show"])
@@ -519,43 +532,53 @@ async def bluez_set_bondable(bondable: bool = True) -> subprocess.CompletedProce
 async def assist_connection(address: str, verbose: bool = False) -> BluezState:
     info_result = await run_command_async(["bluetoothctl", "info", address])
     info_state = build_state(address, info_result, None)
-    steps = [("bluetoothctl info", ["bluetoothctl", "info", address], info_result)]
-    if info_state.paired is not True:
-        steps.append(("sudo btmgmt bondable on", ["sudo", "btmgmt", "bondable", "on"], None))
-        steps.append(("bluetoothctl pairable on", ["bluetoothctl", "pairable", "on"], None))
-        steps.append(("bluez pair", ["bluez", "pair", address], None))
-    if info_state.trusted is not True:
-        steps.append(("bluez trust", ["bluez", "trust", address], None))
-    steps.append(("bluetoothctl connect", ["bluetoothctl", "connect", address], None))
-
     connect_result: subprocess.CompletedProcess[str] | None = None
     async with pairing_agent(address):
-        for title, argv, result in steps:
-            if result is None:
-                if argv[:2] == ["bluez", "pair"]:
-                    result = await bluez_pair_device(address)
-                elif argv[:2] == ["bluez", "trust"]:
-                    result = await bluez_set_trusted(address)
-                elif argv[:4] == ["sudo", "btmgmt", "bondable", "on"]:
-                    result = await bluez_set_bondable(True)
-                elif argv[:3] == ["bluetoothctl", "pairable", "on"]:
-                    result = await bluez_set_pairable(True)
-                else:
-                    result = await run_command_async(argv)
-            if verbose:
-                print_section(title, result)
-            if argv[:4] == ["sudo", "btmgmt", "bondable", "on"] and result.returncode != 0:
-                raise RuntimeError(f"BlueZ bondable failed for {address}: {summarize_failure(result)}")
-            if argv[:2] == ["bluez", "pair"] and result.returncode != 0:
+        if verbose:
+            print_section("bluetoothctl info", info_result)
+
+        if info_state.paired is not True:
+            last_pair_result: subprocess.CompletedProcess[str] | None = None
+            for attempt in range(3):
+                bondable_result = await bluez_set_bondable(True)
+                if verbose:
+                    print_section("sudo btmgmt bondable on", bondable_result)
+                if bondable_result.returncode != 0:
+                    raise RuntimeError(f"BlueZ bondable failed for {address}: {summarize_failure(bondable_result)}")
+
+                pairable_result = await bluez_set_pairable(True)
+                if verbose:
+                    print_section("bluetoothctl pairable on", pairable_result)
+
+                pair_result = await bluez_pair_device(address)
+                last_pair_result = pair_result
+                if verbose:
+                    print_section("bluez pair", pair_result)
+                if pair_result.returncode == 0:
+                    break
+
                 state = await asyncio.to_thread(read_device_state, address)
-                if state.paired is not True:
-                    raise RuntimeError(f"BlueZ pair failed for {address}: {summarize_failure(result)}")
-            if argv[:2] == ["bluez", "trust"] and result.returncode != 0:
+                if state.paired is True:
+                    break
+                if attempt == 2 or not is_transient_pair_failure(pair_result):
+                    raise RuntimeError(f"BlueZ pair failed for {address}: {summarize_failure(pair_result)}")
+                await asyncio.sleep(1.0)
+
+            if last_pair_result is None:
+                raise RuntimeError(f"BlueZ pair failed for {address}: pair step was not executed")
+
+        if info_state.trusted is not True:
+            trust_result = await bluez_set_trusted(address)
+            if verbose:
+                print_section("bluez trust", trust_result)
+            if trust_result.returncode != 0:
                 state = await asyncio.to_thread(read_device_state, address)
                 if state.trusted is not True:
-                    raise RuntimeError(f"BlueZ trust failed for {address}: {summarize_failure(result)}")
-            if argv[:2] == ["bluetoothctl", "connect"]:
-                connect_result = result
+                    raise RuntimeError(f"BlueZ trust failed for {address}: {summarize_failure(trust_result)}")
+
+        connect_result = await run_command_async(["bluetoothctl", "connect", address])
+        if verbose:
+            print_section("bluetoothctl connect", connect_result)
 
     state = await asyncio.to_thread(read_device_state, address)
     if verbose:

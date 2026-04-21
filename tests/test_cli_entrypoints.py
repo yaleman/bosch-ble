@@ -545,6 +545,160 @@ def test_assist_connection_fails_when_pair_fails_and_device_remains_unpaired() -
     asyncio.run(run())
 
 
+def test_assist_connection_retries_transient_pair_failure_before_succeeding() -> None:
+    events: list[object] = []
+    info_result = CompletedProcess(
+        ["bluetoothctl", "info", "AA:BB"],
+        0,
+        stdout="Paired: no\nTrusted: no\nConnected: no\n",
+        stderr="",
+    )
+    transient_pair_result = CompletedProcess(
+        ["bluez", "pair", "AA:BB"],
+        1,
+        stdout="",
+        stderr="Page Timeout\n",
+    )
+    pair_success_result = CompletedProcess(["bluez", "pair", "AA:BB"], 0, stdout="", stderr="")
+    bondable_result = CompletedProcess(["sudo", "btmgmt", "bondable", "on"], 0, stdout="", stderr="")
+    pairable_result = CompletedProcess(["bluetoothctl", "pairable", "on"], 0, stdout="", stderr="")
+    trust_result = CompletedProcess(["bluez", "trust", "AA:BB"], 0, stdout="", stderr="")
+    connect_result = CompletedProcess(["bluetoothctl", "connect", "AA:BB"], 0, stdout="Connected: yes\n", stderr="")
+    unpaired_state = bluez.BluezState(
+        address="AA:BB",
+        visible=True,
+        device=None,
+        name="sensor",
+        paired=False,
+        trusted=False,
+        connected=False,
+        services_resolved=None,
+        bluetoothctl=CompletedProcess(["bluetoothctl"], 0, stdout="Paired: no\n", stderr=""),
+        busctl=None,
+    )
+    connected_state = bluez.BluezState(
+        address="AA:BB",
+        visible=True,
+        device=None,
+        name="sensor",
+        paired=True,
+        trusted=True,
+        connected=True,
+        services_resolved=None,
+        bluetoothctl=CompletedProcess(["bluetoothctl"], 0, stdout="Paired: yes\nConnected: yes\n", stderr=""),
+        busctl=None,
+    )
+
+    @asynccontextmanager
+    async def fake_pairing_agent(_address: str):
+        yield
+
+    async def run() -> None:
+        async def fake_set_bondable(bondable: bool = True) -> CompletedProcess[str]:
+            events.append(("btmgmt", "bondable", bondable))
+            return bondable_result
+
+        async def fake_set_pairable(pairable: bool = True) -> CompletedProcess[str]:
+            events.append(("bluetoothctl", "pairable", pairable))
+            return pairable_result
+
+        async def fake_pair_device(address: str) -> CompletedProcess[str]:
+            events.append(("bluez", "pair", address))
+            if len([event for event in events if event == ("bluez", "pair", address)]) == 1:
+                return transient_pair_result
+            return pair_success_result
+
+        async def fake_set_trusted(address: str, trusted: bool = True) -> CompletedProcess[str]:
+            events.append(("bluez", "trust", address, trusted))
+            return trust_result
+
+        async def fake_run_command(argv: list[str], timeout: float = 15.0) -> CompletedProcess[str]:
+            events.append(tuple(argv))
+            results = {
+                ("bluetoothctl", "info", "AA:BB"): info_result,
+                ("bluetoothctl", "connect", "AA:BB"): connect_result,
+            }
+            return results[tuple(argv)]
+
+        with patch.object(bluez, "run_command_async", side_effect=fake_run_command):
+            with patch.object(bluez, "pairing_agent", side_effect=fake_pairing_agent):
+                with patch.object(bluez, "bluez_set_bondable", side_effect=fake_set_bondable):
+                    with patch.object(bluez, "bluez_set_pairable", side_effect=fake_set_pairable):
+                        with patch.object(bluez, "bluez_pair_device", side_effect=fake_pair_device):
+                            with patch.object(bluez, "bluez_set_trusted", side_effect=fake_set_trusted):
+                                with patch.object(
+                                    bluez,
+                                    "read_device_state",
+                                    side_effect=[unpaired_state, connected_state],
+                                ):
+                                    with patch.object(bluez.asyncio, "sleep", new=AsyncMock()) as sleep_mock:
+                                        result = await bluez.assist_connection("AA:BB")
+
+        assert result is connected_state
+        sleep_mock.assert_awaited_once()
+
+    asyncio.run(run())
+    assert events == [
+        ("bluetoothctl", "info", "AA:BB"),
+        ("btmgmt", "bondable", True),
+        ("bluetoothctl", "pairable", True),
+        ("bluez", "pair", "AA:BB"),
+        ("btmgmt", "bondable", True),
+        ("bluetoothctl", "pairable", True),
+        ("bluez", "pair", "AA:BB"),
+        ("bluez", "trust", "AA:BB", True),
+        ("bluetoothctl", "connect", "AA:BB"),
+    ]
+
+
+def test_assist_connection_fails_after_exhausting_transient_pair_retries() -> None:
+    info_result = CompletedProcess(
+        ["bluetoothctl", "info", "AA:BB"],
+        0,
+        stdout="Paired: no\nTrusted: no\nConnected: no\n",
+        stderr="",
+    )
+    transient_pair_result = CompletedProcess(
+        ["bluez", "pair", "AA:BB"],
+        1,
+        stdout="",
+        stderr="Connection Failed to be Established (0x3e)\n",
+    )
+    bondable_result = CompletedProcess(["sudo", "btmgmt", "bondable", "on"], 0, stdout="", stderr="")
+    pairable_result = CompletedProcess(["bluetoothctl", "pairable", "on"], 0, stdout="", stderr="")
+    unpaired_state = bluez.BluezState(
+        address="AA:BB",
+        visible=True,
+        device=None,
+        name="sensor",
+        paired=False,
+        trusted=False,
+        connected=False,
+        services_resolved=None,
+        bluetoothctl=CompletedProcess(["bluetoothctl"], 0, stdout="Paired: no\n", stderr=""),
+        busctl=None,
+    )
+
+    @asynccontextmanager
+    async def fake_pairing_agent(_address: str):
+        yield
+
+    async def run() -> None:
+        with patch.object(bluez, "run_command_async", side_effect=[info_result]):
+            with patch.object(bluez, "pairing_agent", side_effect=fake_pairing_agent):
+                with patch.object(bluez, "bluez_set_bondable", return_value=bondable_result):
+                    with patch.object(bluez, "bluez_set_pairable", return_value=pairable_result):
+                        with patch.object(bluez, "bluez_pair_device", return_value=transient_pair_result):
+                            with patch.object(bluez, "read_device_state", return_value=unpaired_state):
+                                with patch.object(bluez.asyncio, "sleep", new=AsyncMock()) as sleep_mock:
+                                    with pytest.raises(RuntimeError, match="BlueZ pair failed for AA:BB: Connection Failed to be Established"):
+                                        await bluez.assist_connection("AA:BB")
+
+        assert sleep_mock.await_count == 2
+
+    asyncio.run(run())
+
+
 def test_assist_connection_fails_when_bondable_enable_fails() -> None:
     info_result = CompletedProcess(
         ["bluetoothctl", "info", "AA:BB"],
