@@ -6,12 +6,17 @@
 - CLI entry points are defined in `pyproject.toml`.
 
 ## Preferred Commands
-- `uv sync`
-- `uv run bosch-ble-scan`
-- `uv run bosch-ble-dump-gatt <BLE_ADDRESS>`
-- `uv run bosch-ble-log-chars <BLE_ADDRESS> [output_file]`
-- `uv run pytest`
-- `uv run ruff check`
+- Local command examples only:
+  - `uv sync`
+  - `uv run bosch-ble-scan`
+  - `uv run bosch-ble-dump-gatt <BLE_ADDRESS>`
+  - `uv run bosch-ble-log-chars <BLE_ADDRESS> [output_file]`
+  - `uv run pytest`
+  - `uv run ruff check`
+- Verification rule:
+  - Do not treat local `pytest`, `ruff`, or other Bluetooth-related runs as valid evidence.
+  - Run test and lint verification on the remote host via `REMOTE_HOST`.
+  - If code changes need verification, sync the current worktree to `~/bosch-ble` on the remote host first, then run the checks there.
 
 ## Editing Rules
 - Keep changes direct and prefer editing the existing scripts.
@@ -20,6 +25,7 @@
 - If JavaScript tooling appears, prefer `pnpm`.
 - The remote dev box worktree may be overwritten freely when needed; do not preserve or tiptoe around remote-only changes there.
 - Load `REMOTE_HOST` from the local shell environment via `direnv` before using host-helper scripts or SSH-based workflows.
+- Bluetooth code cannot be validated locally in this repo. All meaningful test and lint runs need to happen on the remote host.
 - The bike often turns off or stops advertising between attempts.
 - Before diagnosing protocol or pairing failures, confirm the bike is awake and visible to BlueZ.
 - Treat `Visible: no`, scan misses, and `Device ... not available` as bike-state failures first.

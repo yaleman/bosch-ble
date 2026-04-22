@@ -57,6 +57,7 @@ PHONE_LIKE_LE_CONNECTION_UNITS = {
     "latency": 0,
     "timeout": 72,
 }
+BOSCH_PAIRING_MANUFACTURER_PAYLOAD = bytes.fromhex("01030001")
 
 
 def log_agent_event(message: str) -> None:
@@ -82,6 +83,7 @@ class BluezState:
     services_resolved: bool | None
     bluetoothctl: subprocess.CompletedProcess[str]
     busctl: subprocess.CompletedProcess[str] | None
+    pairing_advertisement: bool | None = None
 
 
 @dataclass(slots=True)
@@ -144,6 +146,10 @@ def print_section(title: str, result: subprocess.CompletedProcess[str]) -> None:
 
 def device_object_suffix(address: str) -> str:
     return f"dev_{address.upper().replace(':', '_')}"
+
+
+def normalize_address(address: str) -> str:
+    return address.upper()
 
 
 def busctl_available() -> bool:
@@ -216,6 +222,7 @@ def build_state(
     *,
     device: Any | None = None,
     visible: bool | None = None,
+    pairing_advertisement: bool | None = None,
 ) -> BluezState:
     if visible is None:
         visible = device is not None
@@ -234,6 +241,7 @@ def build_state(
         services_resolved=parse_flag(busctl_text, "ServicesResolved"),
         bluetoothctl=bluetoothctl,
         busctl=busctl,
+        pairing_advertisement=pairing_advertisement,
     )
 
 
@@ -242,6 +250,7 @@ def read_device_state(
     *,
     device: Any | None = None,
     visible: bool | None = None,
+    pairing_advertisement: bool | None = None,
 ) -> BluezState:
     bluetoothctl = run_command(["bluetoothctl", "info", address])
     busctl = None
@@ -256,18 +265,74 @@ def read_device_state(
                 "org.bluez.Device1",
             ]
         )
-    return build_state(address, bluetoothctl, busctl, device=device, visible=visible)
+    return build_state(
+        address,
+        bluetoothctl,
+        busctl,
+        device=device,
+        visible=visible,
+        pairing_advertisement=pairing_advertisement,
+    )
+
+
+def is_bosch_pairing_advertisement(advertisement_data: Any | None) -> bool | None:
+    if advertisement_data is None:
+        return None
+    manufacturer_data = getattr(advertisement_data, "manufacturer_data", None) or {}
+    for payload in manufacturer_data.values():
+        if bytes(payload) == BOSCH_PAIRING_MANUFACTURER_PAYLOAD:
+            return True
+    return False
+
+
+async def scan_device_advertisement(
+    address: str,
+    timeout: float,
+) -> tuple[Any | None, Any | None]:
+    target_address = normalize_address(address)
+    found_device: Any | None = None
+    found_advertisement: Any | None = None
+    pairing_seen = asyncio.Event()
+
+    def detection_callback(device: Any, advertisement_data: Any) -> None:
+        nonlocal found_device, found_advertisement
+        device_address = getattr(device, "address", None)
+        if not isinstance(device_address, str) or normalize_address(device_address) != target_address:
+            return
+        found_device = device
+        found_advertisement = advertisement_data
+        if is_bosch_pairing_advertisement(advertisement_data):
+            pairing_seen.set()
+
+    scanner = BleakScanner(detection_callback=detection_callback)
+    await scanner.start()
+    try:
+        try:
+            await asyncio.wait_for(pairing_seen.wait(), timeout=timeout)
+        except TimeoutError:
+            pass
+    finally:
+        await scanner.stop()
+
+    return found_device, found_advertisement
 
 
 async def preflight_device(address: str, scan_timeout: float = DEFAULT_SCAN_TIMEOUT) -> BluezState:
-    device = await BleakScanner.find_device_by_address(address, timeout=scan_timeout)
-    return read_device_state(address, device=device, visible=device is not None)
+    device, advertisement_data = await scan_device_advertisement(address, scan_timeout)
+    return read_device_state(
+        address,
+        device=device,
+        visible=device is not None,
+        pairing_advertisement=is_bosch_pairing_advertisement(advertisement_data),
+    )
 
 
 def print_preflight_summary(state: BluezState) -> None:
     print("== preflight ==")
     print(f"Address: {state.address}")
     print(f"Visible: {format_flag(state.visible)}")
+    if state.pairing_advertisement is not None:
+        print(f"PairingAdvertisement: {format_flag(state.pairing_advertisement)}")
     if state.name:
         print(f"Name: {state.name}")
     print(f"Paired: {format_flag(state.paired)}")
@@ -391,6 +456,31 @@ def is_transient_pair_failure(result: subprocess.CompletedProcess[str]) -> bool:
 def is_device_unavailable(result: subprocess.CompletedProcess[str]) -> bool:
     text = "\n".join(part for part in (result.stdout, result.stderr) if part).lower()
     return "not available" in text
+
+
+def has_interactive_terminal() -> bool:
+    return all(getattr(stream, "isatty", lambda: False)() for stream in (sys.stdin, sys.stdout, sys.stderr))
+
+
+async def ensure_sudo_ready() -> None:
+    if not has_interactive_terminal():
+        return
+    result = await asyncio.to_thread(
+        subprocess.run,
+        ["sudo", "-v"],
+        check=False,
+    )
+    if result.returncode != 0:
+        raise RuntimeError("sudo authentication failed for BlueZ setup.")
+
+
+def assert_pairing_advertisement_ready(state: BluezState, address: str) -> None:
+    if state.visible is not True:
+        return
+    if state.paired is True:
+        return
+    if state.pairing_advertisement is False:
+        raise RuntimeError(f"{address} is visible but not in Bosch pairing advertisement mode.")
 
 
 def controller_show() -> subprocess.CompletedProcess[str]:
@@ -699,6 +789,7 @@ async def bluez_load_connection_parameters(
     return await run_command_async(
         [
             "sudo",
+            "-n",
             sys.executable,
             "-m",
             "bosch_ble.mgmt",
@@ -740,6 +831,7 @@ async def assist_connection(
             print_section("bluetoothctl info", info_result)
 
         if info_state.paired is not True:
+            await ensure_sudo_ready()
             last_pair_result: subprocess.CompletedProcess[str] | None = None
             for attempt in range(3):
                 await bluez_prepare_phone_like_pairing_controller(privacy=privacy)
@@ -749,6 +841,7 @@ async def assist_connection(
                     print_section("bluetoothctl pairable on", pairable_result)
 
                 info_state = await refresh_visible_device(address)
+                assert_pairing_advertisement_ready(info_state, address)
                 if verbose:
                     print_section("post-prepare preflight", info_state.bluetoothctl)
 
@@ -817,12 +910,14 @@ async def connect_device(
     if is_device_unavailable(info_result):
         info_state = await preflight_device(address, scan_timeout=DEFAULT_SCAN_TIMEOUT)
 
+    await ensure_sudo_ready()
     await bluez_prepare_phone_like_pairing_controller(privacy=privacy)
     pairable_result = await bluez_set_pairable(True)
     if verbose:
         print_section("bluetoothctl pairable on", pairable_result)
 
     info_state = await refresh_visible_device(address)
+    assert_pairing_advertisement_ready(info_state, address)
     if verbose:
         print_section("post-prepare preflight", info_state.bluetoothctl)
 
@@ -860,6 +955,7 @@ async def connect_device(
         services_resolved=state.services_resolved,
         bluetoothctl=state.bluetoothctl,
         busctl=state.busctl,
+        pairing_advertisement=info_state.pairing_advertisement,
     )
 
 
@@ -993,6 +1089,22 @@ async def run_pair_diagnostic_attempt(
             visible=False,
             name=preflight.name,
             assist_error="Device not visible during preflight",
+            create_connection_seen=False,
+            enhanced_connection_complete_seen=False,
+            read_remote_features_seen=False,
+            disconnect_reason=None,
+            att_seen=False,
+            smp_seen=False,
+            highest_stage="pre_connection",
+            trace_path="",
+        )
+    if preflight.paired is not True and preflight.pairing_advertisement is False:
+        return PairAttemptSummary(
+            pair_backend=pair_backend,
+            privacy="device" if privacy else "off",
+            visible=True,
+            name=preflight.name,
+            assist_error="Device visible but not in Bosch pairing advertisement mode",
             create_connection_seen=False,
             enhanced_connection_complete_seen=False,
             read_remote_features_seen=False,

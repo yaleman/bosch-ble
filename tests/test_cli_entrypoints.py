@@ -988,6 +988,113 @@ def test_prepare_phone_like_pairing_controller_raises_on_failure() -> None:
     asyncio.run(run())
 
 
+def test_connect_device_rejects_generic_visibility_for_unpaired_device() -> None:
+    info_result = CompletedProcess(
+        ["bluetoothctl", "info", "AA:BB"],
+        0,
+        stdout="Paired: no\nTrusted: no\nConnected: no\n",
+        stderr="",
+    )
+    pairable_result = CompletedProcess(["bluetoothctl", "pairable", "on"], 0, stdout="", stderr="")
+    generic_visible_state = bluez.BluezState(
+        address="AA:BB",
+        visible=True,
+        device=None,
+        name="smart system eBike",
+        paired=False,
+        trusted=False,
+        connected=False,
+        services_resolved=None,
+        bluetoothctl=CompletedProcess(["bluetoothctl"], 0, stdout="Visible: yes\n", stderr=""),
+        busctl=None,
+        pairing_advertisement=False,
+    )
+
+    async def run() -> None:
+        with patch.object(bluez, "run_command_async", side_effect=[info_result]):
+            with patch.object(bluez, "ensure_sudo_ready", new=AsyncMock()):
+                with patch.object(bluez, "bluez_prepare_phone_like_pairing_controller", new=AsyncMock()):
+                    with patch.object(bluez, "bluez_set_pairable", return_value=pairable_result):
+                        with patch.object(
+                            bluez,
+                            "refresh_visible_device",
+                            new=AsyncMock(return_value=generic_visible_state),
+                        ):
+                            with pytest.raises(
+                                RuntimeError,
+                                match="not in Bosch pairing advertisement mode",
+                            ):
+                                await bluez.connect_device("AA:BB")
+
+    asyncio.run(run())
+
+
+def test_run_pair_diagnostic_attempt_rejects_generic_visibility_before_attempt() -> None:
+    generic_visible_state = bluez.BluezState(
+        address="AA:BB",
+        visible=True,
+        device=None,
+        name="smart system eBike",
+        paired=False,
+        trusted=False,
+        connected=False,
+        services_resolved=None,
+        bluetoothctl=CompletedProcess(["bluetoothctl"], 0, stdout="Visible: yes\n", stderr=""),
+        busctl=None,
+        pairing_advertisement=False,
+    )
+
+    async def run() -> None:
+        with patch.object(
+            bluez,
+            "preflight_device",
+            new=AsyncMock(return_value=generic_visible_state),
+        ):
+            with patch.object(bluez, "assist_connection", new=AsyncMock()) as assist_mock:
+                summary = await bluez.run_pair_diagnostic_attempt(
+                    "AA:BB",
+                    pair_backend="dbus",
+                    privacy=False,
+                )
+
+        assist_mock.assert_not_awaited()
+        assert summary.visible is True
+        assert (
+            summary.assist_error
+            == "Device visible but not in Bosch pairing advertisement mode"
+        )
+        assert summary.highest_stage == "pre_connection"
+
+    asyncio.run(run())
+
+
+def test_ensure_sudo_ready_prompts_interactively_when_tty_available() -> None:
+    calls: list[tuple[object, ...]] = []
+
+    class FakeTty:
+        def isatty(self) -> bool:
+            return True
+
+    async def fake_to_thread(func, *args, **kwargs):
+        return func(*args, **kwargs)
+
+    def fake_run(*args, **kwargs) -> CompletedProcess[str]:
+        calls.append(args)
+        return CompletedProcess(args[0], 0, stdout="", stderr="")
+
+    async def run() -> None:
+        with patch.object(sys, "stdin", FakeTty()):
+            with patch.object(sys, "stdout", FakeTty()):
+                with patch.object(sys, "stderr", FakeTty()):
+                    with patch.object(bluez.asyncio, "to_thread", side_effect=fake_to_thread):
+                        with patch.object(bluez.subprocess, "run", side_effect=fake_run):
+                            await bluez.ensure_sudo_ready()
+
+    asyncio.run(run())
+
+    assert calls == [(["sudo", "-v"],)]
+
+
 def test_summarize_btmon_trace_reports_remote_features_only() -> None:
     trace_text = """
 < HCI Command: LE Create Connection
@@ -1550,6 +1657,7 @@ def test_bluez_load_connection_parameters_invokes_helper_module() -> None:
         run_mock.assert_awaited_once_with(
             [
                 "sudo",
+                "-n",
                 sys.executable,
                 "-m",
                 "bosch_ble.mgmt",
@@ -2064,9 +2172,9 @@ def test_bluez_preflight_cli_reports_visible_device_and_state(
 
     with patch.object(bluez, "run_command", side_effect=fake_run):
         with patch.object(
-            bluez.BleakScanner,
-            "find_device_by_address",
-            new=AsyncMock(return_value=fake_device),
+            bluez,
+            "scan_device_advertisement",
+            new=AsyncMock(return_value=(fake_device, None)),
         ):
             with patch("bosch_ble.bluez.shutil.which", return_value="/usr/bin/busctl"):
                 with patch("sys.argv", ["bosch-ble-bluez-preflight", "AA:BB"]):
@@ -2109,9 +2217,9 @@ def test_bluez_preflight_cli_reads_services_resolved_from_tree_output_with_prefi
 
     with patch.object(bluez, "run_command", side_effect=fake_run):
         with patch.object(
-            bluez.BleakScanner,
-            "find_device_by_address",
-            new=AsyncMock(return_value=None),
+            bluez,
+            "scan_device_advertisement",
+            new=AsyncMock(return_value=(None, None)),
         ):
             with patch("bosch_ble.bluez.shutil.which", return_value="/usr/bin/busctl"):
                 with patch("sys.argv", ["bosch-ble-bluez-preflight", "AA:BB"]):
@@ -2156,9 +2264,9 @@ def test_bluez_preflight_cli_falls_back_when_busctl_tree_with_path_fails(
 
     with patch.object(bluez, "run_command", side_effect=fake_run):
         with patch.object(
-            bluez.BleakScanner,
-            "find_device_by_address",
-            new=AsyncMock(return_value=None),
+            bluez,
+            "scan_device_advertisement",
+            new=AsyncMock(return_value=(None, None)),
         ):
             with patch("bosch_ble.bluez.shutil.which", return_value="/usr/bin/busctl"):
                 with patch("sys.argv", ["bosch-ble-bluez-preflight", "AA:BB"]):
@@ -2180,9 +2288,9 @@ def test_bluez_preflight_cli_reports_absent_device(
 
     with patch.object(bluez, "run_command", side_effect=fake_run):
         with patch.object(
-            bluez.BleakScanner,
-            "find_device_by_address",
-            new=AsyncMock(return_value=None),
+            bluez,
+            "scan_device_advertisement",
+            new=AsyncMock(return_value=(None, None)),
         ):
             with patch("bosch_ble.bluez.shutil.which", return_value=None):
                 with patch("sys.argv", ["bosch-ble-bluez-preflight", "AA:BB"]):
