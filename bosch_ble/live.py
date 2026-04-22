@@ -140,6 +140,7 @@ class McspLiveSession:
         self._send_queue: asyncio.Queue[bytes | None] = asyncio.Queue()
         self._writer_task: asyncio.Task[None] | None = None
         self._startup_packets_pending: list[bytes] = []
+        self._handshake_commands: list[mcsp.Command] = []
         self._startup_ready = False
         self._loop = asyncio.get_running_loop()
         self._handshake_future: asyncio.Future[list[mcsp.Command]] = self._loop.create_future()
@@ -205,6 +206,7 @@ class McspLiveSession:
                         self.on_decode_error(frame, exc)
                     continue
                 commands.append(command)
+                self._handshake_commands.append(command)
                 if self.on_command is not None:
                     self.on_command(command)
                 continue
@@ -227,5 +229,5 @@ class McspLiveSession:
             else:
                 self._startup_packets_pending.extend(packets)
 
-        if not self._handshake_future.done() and is_bike_handshake(commands):
-            self._handshake_future.set_result(commands)
+        if not self._handshake_future.done() and is_bike_handshake(self._handshake_commands):
+            self._handshake_future.set_result(list(self._handshake_commands))

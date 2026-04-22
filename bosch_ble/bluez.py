@@ -1086,7 +1086,7 @@ def connect_cli() -> None:
         raise SystemExit(2)
 
     try:
-        asyncio.run(assist_connection(sys.argv[1], verbose=True))
+        asyncio.run(connect_device(sys.argv[1], verbose=True))
     except KeyboardInterrupt:
         raise SystemExit(130)
     except Exception as exc:

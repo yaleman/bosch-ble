@@ -271,6 +271,63 @@ def test_connected_client_stages_bosch_security() -> None:
     assert staged[0][1] == "AA:BB"
 
 
+def test_mcsp_live_session_detects_handshake_across_multiple_notifications() -> None:
+    class FakeClient:
+        def __init__(self) -> None:
+            self.calls: list[tuple[str, str]] = []
+
+        async def start_notify(self, uuid: str, callback) -> None:
+            self.calls.append(("start_notify", uuid))
+            callback(
+                "notify-sender",
+                bytearray.fromhex(
+                    "10020103"
+                    "10030400f4"
+                    "1006020100000800"
+                    "1006020200002000"
+                ),
+            )
+            callback(
+                "notify-sender",
+                bytearray.fromhex(
+                    "1006020300002000"
+                    "1006020400000000"
+                    "1006020500000000"
+                    "1006020600000000"
+                    "1006020700000000"
+                ),
+            )
+
+        async def stop_notify(self, uuid: str) -> None:
+            self.calls.append(("stop_notify", uuid))
+
+        async def write_gatt_char(self, uuid: str, data: bytes, response: bool = False) -> None:
+            self.calls.append(("write_gatt_char", uuid))
+
+    async def run() -> list[mcsp.Command]:
+        client = FakeClient()
+        session = live.McspLiveSession(client, "receive", "send")
+        await session.start()
+        try:
+            return await session.wait_for_handshake(0.1)
+        finally:
+            await session.stop()
+
+    commands = asyncio.run(run())
+
+    assert commands == [
+        mcsp.VersionCommand(version=3),
+        mcsp.MaxSegmentationPacketCommand(max_packet_size=244),
+        mcsp.AdvanceTransmitWindowCommand(channel=mcsp.McspChannel.CHANNEL1, advance=2048),
+        mcsp.AdvanceTransmitWindowCommand(channel=mcsp.McspChannel.CHANNEL2, advance=8192),
+        mcsp.AdvanceTransmitWindowCommand(channel=mcsp.McspChannel.CHANNEL3, advance=8192),
+        mcsp.AdvanceTransmitWindowCommand(channel=mcsp.McspChannel.CHANNEL4, advance=0),
+        mcsp.AdvanceTransmitWindowCommand(channel=mcsp.McspChannel.CHANNEL5, advance=0),
+        mcsp.AdvanceTransmitWindowCommand(channel=mcsp.McspChannel.CHANNEL6, advance=0),
+        mcsp.AdvanceTransmitWindowCommand(channel=mcsp.McspChannel.CHANNEL7, advance=0),
+    ]
+
+
 def test_handshake_main_logs_non_command_frames_after_handshake(
     tmp_path: Path,
     capsys,
@@ -439,6 +496,82 @@ def test_handshake_main_serializes_startup_responses_after_handshake_packets(
         "30054081a00271",
         "3004c0810824",
     ]
+
+
+def test_handshake_main_only_stops_notify_once(
+    tmp_path: Path,
+) -> None:
+    receive_uuid = "00000011-eaa2-11e9-81b4-2a2ae2dbcce4"
+    send_uuid = "00000012-eaa2-11e9-81b4-2a2ae2dbcce4"
+    services = [
+        FakeService(
+            "00000010-eaa2-11e9-81b4-2a2ae2dbcce4",
+            [
+                FakeCharacteristic(receive_uuid, ["notify"]),
+                FakeCharacteristic(send_uuid, ["write-without-response"]),
+            ],
+        )
+    ]
+    stop_calls: list[str] = []
+
+    class FakeClient:
+        def __init__(self, address_or_ble_device, timeout: float = 20.0) -> None:
+            self.address_or_ble_device = address_or_ble_device
+            self.timeout = timeout
+            self.is_connected = True
+            self.services = services
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb) -> None:
+            return None
+
+        async def start_notify(self, uuid: str, callback) -> None:
+            callback(
+                "notify-sender",
+                bytearray.fromhex(
+                    "10020103"
+                    "10030400f4"
+                    "1006020100000800"
+                    "1006020200002000"
+                    "1006020300002000"
+                    "1006020400000000"
+                    "1006020500000000"
+                    "1006020600000000"
+                    "1006020700000000"
+                ),
+            )
+
+        async def stop_notify(self, uuid: str) -> None:
+            stop_calls.append(uuid)
+            if len(stop_calls) > 1:
+                raise RuntimeError(f"duplicate stop_notify for {uuid}")
+
+        async def write_gatt_char(self, uuid: str, data: bytes, response: bool = False) -> None:
+            return None
+
+    async def run() -> None:
+        state = bluez.BluezState(
+            address="AA:BB",
+            visible=False,
+            device=None,
+            name="sensor",
+            paired=True,
+            trusted=True,
+            connected=True,
+            services_resolved=True,
+            bluetoothctl=CompletedProcess(["bluetoothctl"], 0, stdout="", stderr=""),
+            busctl=CompletedProcess(["busctl"], 0, stdout="", stderr=""),
+        )
+        with patch.object(handshake.live.dump_gatt, "prepare_connection", new=AsyncMock(return_value=state)):
+            with patch.object(handshake.live.dump_gatt, "client_target_for_state", return_value=object()):
+                with patch.object(handshake.live, "BleakClient", FakeClient):
+                    await handshake.main("AA:BB", str(tmp_path / "handshake.log"))
+
+    asyncio.run(run())
+
+    assert stop_calls == [receive_uuid]
 
 
 def test_build_startup_response_packets_answers_reads_and_subscribes() -> None:

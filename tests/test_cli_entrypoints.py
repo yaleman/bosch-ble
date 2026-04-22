@@ -2329,14 +2329,14 @@ def test_bluez_info_cli_runs_devices_info_and_busctl(
     assert "== busctl introspect ==" in output
 
 
-def test_bluez_connect_cli_runs_pair_trust_connect_sequence(
+def test_bluez_connect_cli_uses_connect_first_path(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    with patch.object(bluez, "assist_connection", new=AsyncMock()) as assist_connection:
+    with patch.object(bluez, "connect_device", new=AsyncMock()) as connect_device:
         with patch("sys.argv", ["bosch-ble-bluez-connect", "AA:BB"]):
             bluez.connect_cli()
 
-    assist_connection.assert_awaited_once_with("AA:BB", verbose=True)
+    connect_device.assert_awaited_once_with("AA:BB", verbose=True)
     assert capsys.readouterr().out == ""
 
 
@@ -2345,7 +2345,7 @@ def test_bluez_connect_cli_exits_nonzero_when_connect_fails(
 ) -> None:
     with patch.object(
         bluez,
-        "assist_connection",
+        "connect_device",
         new=AsyncMock(side_effect=RuntimeError("BlueZ connect failed for AA:BB: Failed")),
     ):
         with patch("sys.argv", ["bosch-ble-bluez-connect", "AA:BB"]):

@@ -169,7 +169,6 @@ async def main(address: str, out_file: str = "ble_handshake.txt") -> None:
                     await asyncio.sleep(POST_HANDSHAKE_WAIT_SECONDS)
             finally:
                 await session.stop()
-                await client.stop_notify(receive_uuid)
 
 
 def cli() -> None:
