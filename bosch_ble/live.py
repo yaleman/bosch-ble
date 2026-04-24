@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from contextlib import asynccontextmanager
+from contextlib import suppress
 from typing import Any, Callable
 
 from bleak import BleakClient
@@ -150,11 +151,33 @@ class McspLiveSession:
         await self.client.start_notify(self.receive_uuid, self._notify_handler)
 
     async def stop(self) -> None:
-        await self.client.stop_notify(self.receive_uuid)
-        await self._send_queue.join()
-        await self._send_queue.put(None)
+        stop_error: Exception | None = None
+        try:
+            await self.client.stop_notify(self.receive_uuid)
+        except Exception as exc:
+            stop_error = exc
+
         if self._writer_task is not None:
-            await self._writer_task
+            try:
+                join_task = self._loop.create_task(self._send_queue.join())
+                done, _pending = await asyncio.wait(
+                    {join_task, self._writer_task},
+                    return_when=asyncio.FIRST_COMPLETED,
+                )
+                if self._writer_task in done:
+                    await self._writer_task
+                else:
+                    await join_task
+                    self._send_queue.put_nowait(None)
+                    await self._writer_task
+            finally:
+                if not join_task.done():
+                    join_task.cancel()
+                    with suppress(asyncio.CancelledError):
+                        await join_task
+
+        if stop_error is not None:
+            raise stop_error
 
     async def wait_for_handshake(self, timeout: float) -> list[mcsp.Command]:
         return await asyncio.wait_for(self._handshake_future, timeout=timeout)

@@ -476,7 +476,7 @@ async def ensure_sudo_ready() -> None:
 
 def assert_pairing_advertisement_ready(state: BluezState, address: str) -> None:
     if state.visible is not True:
-        return
+        raise RuntimeError(f"{address} is not visible to BlueZ; wake the bike and retry.")
     if state.paired is True:
         return
     if state.pairing_advertisement is False:

@@ -5,6 +5,8 @@ from pathlib import Path
 from subprocess import CompletedProcess
 from unittest.mock import AsyncMock, patch
 
+import pytest
+
 from bosch_ble import bluez, handshake, live, mcsp
 
 
@@ -326,6 +328,35 @@ def test_mcsp_live_session_detects_handshake_across_multiple_notifications() -> 
         mcsp.AdvanceTransmitWindowCommand(channel=mcsp.McspChannel.CHANNEL6, advance=0),
         mcsp.AdvanceTransmitWindowCommand(channel=mcsp.McspChannel.CHANNEL7, advance=0),
     ]
+
+
+def test_mcsp_live_session_stop_surfaces_writer_failure_without_hanging() -> None:
+    class FakeClient:
+        def __init__(self) -> None:
+            self.calls: list[tuple[str, str]] = []
+            self.callback = None
+
+        async def start_notify(self, uuid: str, callback) -> None:
+            self.calls.append(("start_notify", uuid))
+            self.callback = callback
+
+        async def stop_notify(self, uuid: str) -> None:
+            self.calls.append(("stop_notify", uuid))
+
+        async def write_gatt_char(self, uuid: str, data: bytes, response: bool = False) -> None:
+            self.calls.append(("write_gatt_char", data.hex()))
+            raise RuntimeError("simulated disconnect")
+
+    async def run() -> None:
+        client = FakeClient()
+        session = live.McspLiveSession(client, "receive", "send")
+        await session.start()
+        session.queue_packets([b"\x01", b"\x02"])
+        await asyncio.sleep(0)
+        with pytest.raises(RuntimeError, match="simulated disconnect"):
+            await asyncio.wait_for(session.stop(), timeout=0.1)
+
+    asyncio.run(run())
 
 
 def test_handshake_main_logs_non_command_frames_after_handshake(

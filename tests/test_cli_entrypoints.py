@@ -1029,6 +1029,49 @@ def test_connect_device_rejects_generic_visibility_for_unpaired_device() -> None
     asyncio.run(run())
 
 
+def test_connect_device_rejects_invisible_device_before_connect_attempt() -> None:
+    info_result = CompletedProcess(
+        ["bluetoothctl", "info", "AA:BB"],
+        0,
+        stdout="Paired: no\nTrusted: no\nConnected: no\n",
+        stderr="",
+    )
+    pairable_result = CompletedProcess(["bluetoothctl", "pairable", "on"], 0, stdout="", stderr="")
+    invisible_state = bluez.BluezState(
+        address="AA:BB",
+        visible=False,
+        device=None,
+        name=None,
+        paired=False,
+        trusted=False,
+        connected=False,
+        services_resolved=None,
+        bluetoothctl=CompletedProcess(["bluetoothctl"], 0, stdout="", stderr=""),
+        busctl=None,
+        pairing_advertisement=None,
+    )
+
+    async def run() -> None:
+        with patch.object(bluez, "run_command_async", side_effect=[info_result]) as run_mock:
+            with patch.object(bluez, "ensure_sudo_ready", new=AsyncMock()):
+                with patch.object(bluez, "bluez_prepare_phone_like_pairing_controller", new=AsyncMock()):
+                    with patch.object(bluez, "bluez_set_pairable", return_value=pairable_result):
+                        with patch.object(
+                            bluez,
+                            "refresh_visible_device",
+                            new=AsyncMock(return_value=invisible_state),
+                        ):
+                            with pytest.raises(
+                                RuntimeError,
+                                match="not visible",
+                            ):
+                                await bluez.connect_device("AA:BB")
+
+        assert run_mock.await_count == 1
+
+    asyncio.run(run())
+
+
 def test_run_pair_diagnostic_attempt_rejects_generic_visibility_before_attempt() -> None:
     generic_visible_state = bluez.BluezState(
         address="AA:BB",
@@ -1180,6 +1223,54 @@ def test_assist_connection_uses_btmgmt_pair_backend() -> None:
 
         assert result is connected_state
         pair_mock.assert_awaited_once_with("AA:BB")
+
+    asyncio.run(run())
+
+
+def test_assist_connection_rejects_invisible_device_before_pair_attempt() -> None:
+    info_result = CompletedProcess(
+        ["bluetoothctl", "info", "AA:BB"],
+        0,
+        stdout="Paired: no\nTrusted: no\nConnected: no\n",
+        stderr="",
+    )
+    pairable_result = CompletedProcess(["bluetoothctl", "pairable", "on"], 0, stdout="", stderr="")
+    invisible_state = bluez.BluezState(
+        address="AA:BB",
+        visible=False,
+        device=None,
+        name=None,
+        paired=False,
+        trusted=False,
+        connected=False,
+        services_resolved=None,
+        bluetoothctl=CompletedProcess(["bluetoothctl"], 0, stdout="", stderr=""),
+        busctl=None,
+        pairing_advertisement=None,
+    )
+
+    @asynccontextmanager
+    async def fake_pairing_agent(_address: str):
+        yield
+
+    async def run() -> None:
+        with patch.object(bluez, "run_command_async", side_effect=[info_result]) as run_mock:
+            with patch.object(bluez, "pairing_agent", side_effect=fake_pairing_agent):
+                with patch.object(bluez, "ensure_sudo_ready", new=AsyncMock()):
+                    with patch.object(bluez, "bluez_prepare_phone_like_pairing_controller", new=AsyncMock()):
+                        with patch.object(bluez, "bluez_set_pairable", return_value=pairable_result):
+                            with patch.object(
+                                bluez,
+                                "refresh_visible_device",
+                                new=AsyncMock(return_value=invisible_state),
+                            ):
+                                with pytest.raises(
+                                    RuntimeError,
+                                    match="not visible",
+                                ):
+                                    await bluez.assist_connection("AA:BB")
+
+        assert run_mock.await_count == 1
 
     asyncio.run(run())
 
@@ -1573,6 +1664,43 @@ def test_prepare_connection_accepts_connected_state_when_services_do_not_resolve
         assert state.address == "AA:BB"
         assert state.connected is True
         assert state.services_resolved is False
+
+    asyncio.run(run())
+
+
+def test_prepare_connection_prefers_fresh_connected_device_handle() -> None:
+    async def run() -> None:
+        stale_device = object()
+        fresh_device = object()
+        preflight_state = bluez.BluezState(
+            address="AA:BB",
+            visible=True,
+            device=stale_device,
+            name="sensor",
+            paired=True,
+            trusted=True,
+            connected=False,
+            services_resolved=False,
+            bluetoothctl=CompletedProcess(["bluetoothctl"], 0, stdout="", stderr=""),
+            busctl=CompletedProcess(["busctl"], 0, stdout="", stderr=""),
+        )
+        connected_state = bluez.BluezState(
+            address="AA:BB",
+            visible=True,
+            device=fresh_device,
+            name="sensor",
+            paired=True,
+            trusted=True,
+            connected=True,
+            services_resolved=False,
+            bluetoothctl=CompletedProcess(["bluetoothctl"], 0, stdout="", stderr=""),
+            busctl=CompletedProcess(["busctl"], 0, stdout="", stderr=""),
+        )
+        with patch.object(dump_gatt, "resolve_device", new=AsyncMock(return_value=preflight_state)):
+            with patch.object(dump_gatt.bluez, "connect_device", new=AsyncMock(return_value=connected_state)):
+                state = await dump_gatt.prepare_connection("AA:BB")
+
+        assert state.device is fresh_device
 
     asyncio.run(run())
 

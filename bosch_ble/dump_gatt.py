@@ -119,8 +119,8 @@ async def prepare_connection(address: str) -> bluez.BluezState:
     return bluez.BluezState(
         address=connected_state.address,
         visible=connected_state.visible,
-        device=state.device,
-        name=state.name or connected_state.name,
+        device=connected_state.device if connected_state.device is not None else state.device,
+        name=connected_state.name or state.name,
         paired=connected_state.paired,
         trusted=connected_state.trusted,
         connected=connected_state.connected,
