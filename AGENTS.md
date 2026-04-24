@@ -41,5 +41,6 @@
 - Scanner output should favor compact table/TUI-style terminal views over verbose scrolling logs.
 
 ## Docs And Comments
+- The canonical implementation guide is `docs/current-design.md`. Review it before substantial behavior changes and keep it in sync when the intended design changes.
 - Use project-relative paths only.
 - Do not use absolute on-disk paths in docs or comments.
