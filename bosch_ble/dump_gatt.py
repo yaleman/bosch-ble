@@ -15,7 +15,6 @@ REDISCOVERY_TIMEOUT = 10.0
 BOSCH_SERVICE_UUID = "00000010-eaa2-11e9-81b4-2a2ae2dbcce4"
 BOSCH_NOTIFY_CHAR_UUID = "00000011-eaa2-11e9-81b4-2a2ae2dbcce4"
 CCCD_UUID = "00002902-0000-1000-8000-00805f9b34fb"
-BOSCH_SECURITY_DESCRIPTOR_HANDLE = 0x001F
 
 
 def props_to_str(props: list[str | "CharacteristicPropertyName"]) -> str:
@@ -49,10 +48,7 @@ def find_bosch_security_descriptor(services: object) -> object:
             if normalize_uuid(getattr(characteristic, "uuid", "")) != BOSCH_NOTIFY_CHAR_UUID:
                 continue
             for descriptor in getattr(characteristic, "descriptors", []):
-                if (
-                    getattr(descriptor, "handle", None) == BOSCH_SECURITY_DESCRIPTOR_HANDLE
-                    and normalize_uuid(getattr(descriptor, "uuid", "")) == CCCD_UUID
-                ):
+                if normalize_uuid(getattr(descriptor, "uuid", "")) == CCCD_UUID:
                     return descriptor
     raise RuntimeError("Bosch security descriptor was not found.")
 

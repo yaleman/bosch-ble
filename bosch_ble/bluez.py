@@ -15,6 +15,7 @@ from typing import Annotated, Any, Literal
 from uuid import uuid4
 
 from bleak import BleakScanner
+from bleak.backends.device import BLEDevice
 from dbus_fast import DBusError, Variant
 from dbus_fast.annotations import DBusObjectPath, DBusSignature, DBusStr, DBusUInt16, DBusUInt32
 from dbus_fast.aio import MessageBus
@@ -839,6 +840,10 @@ async def assist_connection(
                 pairable_result = await bluez_set_pairable(True)
                 if verbose:
                     print_section("bluetoothctl pairable on", pairable_result)
+                if pairable_result.returncode != 0:
+                    raise RuntimeError(
+                        f"BlueZ pairable on failed for {address}: {summarize_failure(pairable_result)}"
+                    )
 
                 info_state = await refresh_visible_device(address)
                 assert_pairing_advertisement_ready(info_state, address)
@@ -915,6 +920,10 @@ async def connect_device(
     pairable_result = await bluez_set_pairable(True)
     if verbose:
         print_section("bluetoothctl pairable on", pairable_result)
+    if pairable_result.returncode != 0:
+        raise RuntimeError(
+            f"BlueZ pairable on failed for {address}: {summarize_failure(pairable_result)}"
+        )
 
     info_state = await refresh_visible_device(address)
     assert_pairing_advertisement_ready(info_state, address)
@@ -944,10 +953,19 @@ async def connect_device(
     if state.connected is False:
         raise RuntimeError(f"BlueZ reports {address} is not connected after connect attempt.")
 
+    device: Any | None = info_state.device
+    device_path = find_device_object_path(state.address)
+    if device_path is not None:
+        device = BLEDevice(
+            state.address,
+            state.name or info_state.name,
+            {"path": device_path},
+        )
+
     return BluezState(
         address=state.address,
         visible=info_state.visible if info_state.visible is not None else state.visible,
-        device=info_state.device,
+        device=device,
         name=info_state.name or state.name,
         paired=state.paired,
         trusted=state.trusted,
@@ -1198,6 +1216,9 @@ def connect_cli() -> None:
         raise SystemExit(2)
 
     try:
+        discovering = controller_discovering_state()
+        print(f"ControllerDiscovering: {format_flag(discovering)}")
+        assert_controller_ready(sys.argv[1], discovering=discovering)
         asyncio.run(connect_device(sys.argv[1], verbose=True))
     except KeyboardInterrupt:
         raise SystemExit(130)

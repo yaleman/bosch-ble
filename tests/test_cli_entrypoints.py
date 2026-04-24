@@ -94,8 +94,8 @@ def test_dump_gatt_cli_falls_back_to_exception_type_when_message_is_empty(
     assert captured.err == "Error: RuntimeError\n"
 
 
-def test_find_bosch_security_descriptor_returns_cccd_on_expected_handle() -> None:
-    descriptor = FakeDescriptor(0x001F, "00002902-0000-1000-8000-00805f9b34fb")
+def test_find_bosch_security_descriptor_returns_cccd_for_bosch_notify_char() -> None:
+    descriptor = FakeDescriptor(0x0042, "00002902-0000-1000-8000-00805f9b34fb")
     notify_char = FakeCharacteristicWithDescriptors(
         "00000011-eaa2-11e9-81b4-2a2ae2dbcce4",
         ["notify"],
@@ -1748,16 +1748,17 @@ def test_connect_device_connects_without_pairing() -> None:
             return CompletedProcess(["sudo"], 0, stdout="", stderr="")
 
         with patch.object(bluez, "run_command_async", side_effect=fake_run_command):
-            with patch.object(
-                bluez,
-                "bluez_prepare_phone_like_pairing_controller",
-                side_effect=fake_prepare_controller,
-            ):
-                with patch.object(bluez, "bluez_set_pairable", side_effect=fake_set_pairable):
-                    with patch.object(bluez, "refresh_visible_device", side_effect=fake_refresh_visible_device):
-                        with patch.object(bluez, "bluez_load_connection_parameters", side_effect=fake_load_conn_params):
-                            with patch.object(bluez, "read_device_state", return_value=connected_state):
-                                state = await bluez.connect_device("AA:BB")
+            with patch.object(bluez, "ensure_sudo_ready", new=AsyncMock()):
+                with patch.object(
+                    bluez,
+                    "bluez_prepare_phone_like_pairing_controller",
+                    side_effect=fake_prepare_controller,
+                ):
+                    with patch.object(bluez, "bluez_set_pairable", side_effect=fake_set_pairable):
+                        with patch.object(bluez, "refresh_visible_device", side_effect=fake_refresh_visible_device):
+                            with patch.object(bluez, "bluez_load_connection_parameters", side_effect=fake_load_conn_params):
+                                with patch.object(bluez, "read_device_state", return_value=connected_state):
+                                    state = await bluez.connect_device("AA:BB")
 
         assert state.address == "AA:BB"
         assert state.connected is True
@@ -1772,6 +1773,107 @@ def test_connect_device_connects_without_pairing() -> None:
         ("load-conn-params", "AA:BB"),
         ("bluetoothctl", "connect", "AA:BB"),
     ]
+
+
+def test_connect_device_surfaces_pairable_setup_failure() -> None:
+    info_result = CompletedProcess(["bluetoothctl", "info", "AA:BB"], 0, stdout="", stderr="")
+    pairable_result = CompletedProcess(
+        ["bluetoothctl", "pairable", "on"],
+        1,
+        stdout="",
+        stderr="Failed to set pairable on\n",
+    )
+    connect_result = CompletedProcess(["bluetoothctl", "connect", "AA:BB"], 0, stdout="Connected: yes\n", stderr="")
+    connected_state = bluez.BluezState(
+        address="AA:BB",
+        visible=True,
+        device=None,
+        name="sensor",
+        paired=False,
+        trusted=False,
+        connected=True,
+        services_resolved=False,
+        bluetoothctl=CompletedProcess(["bluetoothctl"], 0, stdout="Connected: yes\n", stderr=""),
+        busctl=CompletedProcess(["busctl"], 0, stdout="", stderr=""),
+        pairing_advertisement=True,
+    )
+
+    async def run() -> None:
+        with patch.object(bluez, "run_command_async", side_effect=[info_result, connect_result]) as run_mock:
+            with patch.object(bluez, "ensure_sudo_ready", new=AsyncMock()):
+                with patch.object(bluez, "bluez_prepare_phone_like_pairing_controller", new=AsyncMock()):
+                    with patch.object(bluez, "bluez_set_pairable", return_value=pairable_result):
+                        with patch.object(bluez, "refresh_visible_device", new=AsyncMock(return_value=connected_state)):
+                            with patch.object(
+                                bluez,
+                                "bluez_load_connection_parameters",
+                                new=AsyncMock(return_value=CompletedProcess(["sudo"], 0, stdout="", stderr="")),
+                            ):
+                                with patch.object(bluez, "read_device_state", return_value=connected_state):
+                                    with pytest.raises(
+                                        RuntimeError,
+                                        match="BlueZ pairable on failed for AA:BB: Failed to set pairable on",
+                                    ):
+                                        await bluez.connect_device("AA:BB")
+
+        assert run_mock.await_count == 1
+
+    asyncio.run(run())
+
+
+def test_connect_device_returns_bluez_path_target_after_connect() -> None:
+    scan_device = object()
+    info_result = CompletedProcess(["bluetoothctl", "info", "AA:BB"], 0, stdout="", stderr="")
+    pairable_result = CompletedProcess(["bluetoothctl", "pairable", "on"], 0, stdout="", stderr="")
+    connect_result = CompletedProcess(["bluetoothctl", "connect", "AA:BB"], 0, stdout="Connected: yes\n", stderr="")
+    scan_state = bluez.BluezState(
+        address="AA:BB",
+        visible=True,
+        device=scan_device,
+        name="sensor",
+        paired=False,
+        trusted=False,
+        connected=False,
+        services_resolved=False,
+        bluetoothctl=CompletedProcess(["bluetoothctl"], 0, stdout="", stderr=""),
+        busctl=CompletedProcess(["busctl"], 0, stdout="", stderr=""),
+    )
+    connected_state = bluez.BluezState(
+        address="AA:BB",
+        visible=True,
+        device=None,
+        name="sensor",
+        paired=False,
+        trusted=False,
+        connected=True,
+        services_resolved=False,
+        bluetoothctl=CompletedProcess(["bluetoothctl"], 0, stdout="Connected: yes\n", stderr=""),
+        busctl=CompletedProcess(["busctl"], 0, stdout="", stderr=""),
+    )
+
+    async def run() -> None:
+        with patch.object(bluez, "run_command_async", side_effect=[info_result, connect_result]):
+            with patch.object(bluez, "ensure_sudo_ready", new=AsyncMock()):
+                with patch.object(bluez, "bluez_prepare_phone_like_pairing_controller", new=AsyncMock()):
+                    with patch.object(bluez, "bluez_set_pairable", return_value=pairable_result):
+                        with patch.object(bluez, "refresh_visible_device", new=AsyncMock(return_value=scan_state)):
+                            with patch.object(
+                                bluez,
+                                "bluez_load_connection_parameters",
+                                new=AsyncMock(return_value=CompletedProcess(["sudo"], 0, stdout="", stderr="")),
+                            ):
+                                with patch.object(bluez, "read_device_state", return_value=connected_state):
+                                    with patch.object(
+                                        bluez,
+                                        "find_device_object_path",
+                                        return_value="/org/bluez/hci0/dev_AA_BB",
+                                    ):
+                                        state = await bluez.connect_device("AA:BB")
+
+        assert getattr(state.device, "address", None) == "AA:BB"
+        assert getattr(state.device, "details", {}).get("path") == "/org/bluez/hci0/dev_AA_BB"
+
+    asyncio.run(run())
 
 
 def test_bluez_load_connection_parameters_invokes_helper_module() -> None:
@@ -2568,29 +2670,53 @@ def test_bluez_info_cli_runs_devices_info_and_busctl(
 def test_bluez_connect_cli_uses_connect_first_path(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    with patch.object(bluez, "connect_device", new=AsyncMock()) as connect_device:
-        with patch("sys.argv", ["bosch-ble-bluez-connect", "AA:BB"]):
-            bluez.connect_cli()
+    with patch.object(bluez, "controller_discovering_state", return_value=False):
+        with patch.object(bluez, "assert_controller_ready") as assert_controller_ready:
+            with patch.object(bluez, "connect_device", new=AsyncMock()) as connect_device:
+                with patch("sys.argv", ["bosch-ble-bluez-connect", "AA:BB"]):
+                    bluez.connect_cli()
 
+    assert_controller_ready.assert_called_once_with("AA:BB", discovering=False)
     connect_device.assert_awaited_once_with("AA:BB", verbose=True)
-    assert capsys.readouterr().out == ""
+    assert capsys.readouterr().out == "ControllerDiscovering: no\n"
+
+
+def test_bluez_connect_cli_surfaces_controller_busy_failure(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    with patch.object(bluez, "controller_discovering_state", return_value=True):
+        with patch.object(
+            bluez,
+            "assert_controller_ready",
+            side_effect=RuntimeError("Bluetooth controller is busy before connecting to AA:BB"),
+        ):
+            with patch("sys.argv", ["bosch-ble-bluez-connect", "AA:BB"]):
+                with pytest.raises(SystemExit) as excinfo:
+                    bluez.connect_cli()
+
+    assert excinfo.value.code == 1
+    output = capsys.readouterr()
+    assert output.out == "ControllerDiscovering: yes\n"
+    assert output.err == "Error: Bluetooth controller is busy before connecting to AA:BB\n"
 
 
 def test_bluez_connect_cli_exits_nonzero_when_connect_fails(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    with patch.object(
-        bluez,
-        "connect_device",
-        new=AsyncMock(side_effect=RuntimeError("BlueZ connect failed for AA:BB: Failed")),
-    ):
-        with patch("sys.argv", ["bosch-ble-bluez-connect", "AA:BB"]):
-            with pytest.raises(SystemExit) as excinfo:
-                bluez.connect_cli()
+    with patch.object(bluez, "controller_discovering_state", return_value=False):
+        with patch.object(bluez, "assert_controller_ready"):
+            with patch.object(
+                bluez,
+                "connect_device",
+                new=AsyncMock(side_effect=RuntimeError("BlueZ connect failed for AA:BB: Failed")),
+            ):
+                with patch("sys.argv", ["bosch-ble-bluez-connect", "AA:BB"]):
+                    with pytest.raises(SystemExit) as excinfo:
+                        bluez.connect_cli()
 
     assert excinfo.value.code == 1
     output = capsys.readouterr()
-    assert output.out == ""
+    assert output.out == "ControllerDiscovering: no\n"
     assert output.err == "Error: BlueZ connect failed for AA:BB: Failed\n"
 
 
