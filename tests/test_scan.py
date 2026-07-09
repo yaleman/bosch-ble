@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import sys
 from datetime import datetime, timedelta
 from pathlib import Path
 from unittest.mock import patch
@@ -376,7 +377,7 @@ def test_cli_clears_terminal_after_app_exit() -> None:
     assert events == ["run", "clear"]
 
 
-def test_cli_execs_dump_gatt_for_selected_address() -> None:
+def test_cli_runs_dump_gatt_as_subprocess_for_selected_address() -> None:
     events: list[object] = []
 
     class FakeApp:
@@ -389,13 +390,17 @@ def test_cli_execs_dump_gatt_for_selected_address() -> None:
             "bosch_ble.scan.clear_terminal", side_effect=lambda: events.append("clear")
         ):
             with patch(
-                "bosch_ble.scan.os.execvp",
-                side_effect=lambda cmd, argv: events.append(("exec", cmd, argv)),
+                "bosch_ble.scan.subprocess.run",
+                side_effect=lambda *args, **kwargs: events.append(("subprocess", args, kwargs)),
             ):
                 cli()
 
     assert events == [
         "run",
         "clear",
-        ("exec", "bosch-ble-dump-gatt", ["bosch-ble-dump-gatt", "AA:BB"]),
+        (
+            "subprocess",
+            ([sys.executable, "-m", "bosch_ble.dump_gatt", "AA:BB"],),
+            {"check": False},
+        ),
     ]

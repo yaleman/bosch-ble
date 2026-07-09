@@ -4,28 +4,35 @@ from __future__ import annotations
 import asyncio
 import signal
 import sys
-from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from bosch_ble import live
+from bosch_ble import live, mcsp
+from bosch_ble._common import format_cli_error, ts
 
 
 STOP = asyncio.Event()
 
 
-def ts() -> str:
-    return datetime.now().isoformat(timespec="seconds")
+def collect_log_characteristics(services: object) -> tuple[list[str], list[str]]:
+    notify_chars: list[str] = []
+    read_chars: list[str] = []
+    for service in services:
+        if str(getattr(service, "uuid", "")).lower() == mcsp.MCSP_SERVICE_UUID:
+            continue
+        for char in getattr(service, "characteristics", []):
+            props = set(char.properties)
+            if "notify" in props or "indicate" in props:
+                notify_chars.append(str(char.uuid))
+            if "read" in props:
+                read_chars.append(str(char.uuid))
+    return notify_chars, read_chars
 
 
-def format_cli_error(exc: Exception) -> str:
-    return str(exc) or type(exc).__name__
-
-
-async def main(address: str, out_file: str = "ble_log.txt") -> None:
+async def main(address: str, out_file: str | None = None) -> None:
     global STOP
     STOP = asyncio.Event()
-    path = Path(out_file)
+    path = Path(out_file or f"ble_log-{ts()}.txt")
     print(f"Connecting to {address} ...", flush=True)
     print(f"Logging to {path}", flush=True)
 
@@ -50,13 +57,7 @@ async def main(address: str, out_file: str = "ble_log.txt") -> None:
             notify_chars: list[str] = []
             read_chars: list[str] = []
 
-            for service in client.services:
-                for char in service.characteristics:
-                    props = set(char.properties)
-                    if "notify" in props or "indicate" in props:
-                        notify_chars.append(char.uuid)
-                    if "read" in props:
-                        read_chars.append(char.uuid)
+            notify_chars, read_chars = collect_log_characteristics(client.services)
 
             print("Subscribing to notifiable characteristics...", flush=True)
             for uuid in notify_chars:
@@ -99,7 +100,7 @@ def cli() -> None:
         raise SystemExit(2)
 
     address = sys.argv[1]
-    output = sys.argv[2] if len(sys.argv) == 3 else "ble_log.txt"
+    output = sys.argv[2] if len(sys.argv) == 3 else f"ble_log-{ts()}.txt"
     try:
         asyncio.run(main(address, output))
     except KeyboardInterrupt:

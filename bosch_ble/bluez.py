@@ -16,6 +16,7 @@ from uuid import uuid4
 
 from bleak import BleakScanner
 from bleak.backends.device import BLEDevice
+from bosch_ble._common import format_cli_error, normalize_address
 from dbus_fast import DBusError, Variant
 from dbus_fast.annotations import DBusObjectPath, DBusSignature, DBusStr, DBusUInt16, DBusUInt32
 from dbus_fast.aio import MessageBus
@@ -149,10 +150,6 @@ def device_object_suffix(address: str) -> str:
     return f"dev_{address.upper().replace(':', '_')}"
 
 
-def normalize_address(address: str) -> str:
-    return address.upper()
-
-
 def busctl_available() -> bool:
     return shutil.which("busctl") is not None
 
@@ -177,10 +174,6 @@ def find_device_object_path(address: str) -> str | None:
             return object_path
 
     return None
-
-
-def format_cli_error(exc: Exception) -> str:
-    return str(exc) or type(exc).__name__
 
 
 def format_flag(value: bool | None) -> str:
@@ -1103,7 +1096,7 @@ async def run_pair_diagnostic_attempt(
     if preflight.visible is not True:
         return PairAttemptSummary(
             pair_backend=pair_backend,
-            privacy="device" if privacy else "off",
+            privacy="on" if privacy else "off",
             visible=False,
             name=preflight.name,
             assist_error="Device not visible during preflight",
@@ -1119,7 +1112,7 @@ async def run_pair_diagnostic_attempt(
     if preflight.paired is not True and preflight.pairing_advertisement is False:
         return PairAttemptSummary(
             pair_backend=pair_backend,
-            privacy="device" if privacy else "off",
+            privacy="on" if privacy else "off",
             visible=True,
             name=preflight.name,
             assist_error="Device visible but not in Bosch pairing advertisement mode",

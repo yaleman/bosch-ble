@@ -89,20 +89,30 @@ def bind_mgmt_socket(sock: socket.socket) -> None:
 
 
 def receive_mgmt_response(sock: socket.socket) -> tuple[int, int]:
+    buf = b""
     while True:
-        packet = sock.recv(4096)
-        if len(packet) < 6:
+        chunk = sock.recv(4096)
+        if not chunk:
             continue
-        event_code, _index, payload_len = struct.unpack_from("<HHH", packet, 0)
-        payload = packet[6 : 6 + payload_len]
-        if event_code == MGMT_EV_CMD_COMPLETE and len(payload) >= 3:
-            opcode, status = struct.unpack_from("<HB", payload, 0)
-            if opcode == MGMT_OP_LOAD_CONN_PARAM:
-                return event_code, status
-        if event_code == MGMT_EV_CMD_STATUS and len(payload) >= 3:
-            opcode, status = struct.unpack_from("<HB", payload, 0)
-            if opcode == MGMT_OP_LOAD_CONN_PARAM:
-                return event_code, status
+        buf += chunk
+        offset = 0
+        while offset + 6 <= len(buf):
+            event_code, _index, payload_len = struct.unpack_from("<HHH", buf, offset)
+            event_end = offset + 6 + payload_len
+            if event_end > len(buf):
+                break
+            payload = buf[offset + 6 : event_end]
+            if event_code == MGMT_EV_CMD_COMPLETE and len(payload) >= 3:
+                opcode, status = struct.unpack_from("<HB", payload, 0)
+                if opcode == MGMT_OP_LOAD_CONN_PARAM:
+                    return event_code, status
+            if event_code == MGMT_EV_CMD_STATUS and len(payload) >= 3:
+                opcode, status = struct.unpack_from("<HB", payload, 0)
+                if opcode == MGMT_OP_LOAD_CONN_PARAM:
+                    return event_code, status
+            offset = event_end
+        if offset > 0:
+            buf = buf[offset:]
 
 
 def status_text(status: int) -> str:

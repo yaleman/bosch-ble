@@ -6,7 +6,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from subprocess import CompletedProcess
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, patch
+from unittest.mock import ANY, AsyncMock, patch
 
 import pytest
 
@@ -122,7 +122,7 @@ def test_find_bosch_security_descriptor_fails_cleanly_when_service_is_missing() 
         [FakeCharacteristicWithDescriptors("2a00", ["read"], [])],
     )
 
-    with pytest.raises(RuntimeError) as excinfo:
+    with pytest.raises(dump_gatt.BoschSecurityDescriptorMissing) as excinfo:
         dump_gatt.find_bosch_security_descriptor([service])
 
     assert str(excinfo.value) == "Bosch security descriptor was not found."
@@ -2205,15 +2205,18 @@ def test_log_chars_cli_shows_usage_without_address(capsys: pytest.CaptureFixture
 
 
 def test_log_chars_cli_runs_async_main_with_default_output() -> None:
+    captured: list[tuple[str, str]] = []
+
     async def fake_main(address: str, out_file: str) -> None:
-        assert address == "AA:BB"
-        assert out_file == "ble_log.txt"
+        captured.append((address, out_file))
 
     with patch.object(log_chars, "main", side_effect=fake_main) as patched_main:
         with patch("sys.argv", ["bosch-ble-log-chars", "AA:BB"]):
             log_chars.cli()
 
-    patched_main.assert_called_once_with("AA:BB", "ble_log.txt")
+    patched_main.assert_called_once_with("AA:BB", ANY)
+    assert captured[0][0] == "AA:BB"
+    assert captured[0][1].startswith("ble_log-")
 
 
 def test_log_chars_cli_runs_async_main_with_explicit_output() -> None:

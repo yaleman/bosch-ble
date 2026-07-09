@@ -4,10 +4,10 @@ from __future__ import annotations
 import asyncio
 import signal
 import sys
-from datetime import datetime
 from pathlib import Path
 
 from bosch_ble import live, mcsp, messagebus as messagebus_mod
+from bosch_ble._common import format_cli_error, ts
 
 
 HANDSHAKE_TIMEOUT_SECONDS = 10.0
@@ -16,29 +16,16 @@ STARTUP_WRITE_ADDRESSES = {0x40A9}
 STARTUP_RPC_ADDRESSES = {0x409B, 0x409C}
 
 
-def ts() -> str:
-    return datetime.now().isoformat(timespec="seconds")
-
-
-def format_cli_error(exc: Exception) -> str:
-    return str(exc) or type(exc).__name__
-
-
 find_mcsp_transport = live.find_mcsp_transport
 is_bike_handshake = live.is_bike_handshake
 build_handshake_response = live.build_handshake_response
 
 
 def build_startup_response_packets(
-    messagebus: bytes | None = None,
     *,
-    frame: mcsp.Frame | None = None,
+    frame: mcsp.Frame,
     decoded: messagebus_mod.MessageFrame | None = None,
 ) -> list[bytes]:
-    if frame is None:
-        if messagebus is None:
-            return []
-        frame = mcsp.decode_frame(messagebus)
     if frame.channel is mcsp.McspChannel.COMMAND:
         return []
 
@@ -117,8 +104,8 @@ def build_startup_response_packets(
     ]
 
 
-async def main(address: str, out_file: str = "ble_handshake.txt") -> None:
-    path = Path(out_file)
+async def main(address: str, out_file: str | None = None) -> None:
+    path = Path(out_file or f"ble_handshake-{ts()}.txt")
     print(f"Connecting to {address} ...", flush=True)
     print(f"Logging to {path}", flush=True)
 
@@ -140,6 +127,11 @@ async def main(address: str, out_file: str = "ble_handshake.txt") -> None:
                 fh.flush()
 
             emit(f"{ts()} CONNECTED {address}")
+
+            def log_notify(sender: object, payload: bytes) -> None:
+                emit(f"{ts()} NOTIFY sender={sender} hex={payload.hex()} raw={payload!r}")
+                emit(f"{ts()} NOTIFY-DECODED {live.summarize_packet(payload)}")
+
             session = live.McspLiveSession(
                 client,
                 receive_uuid,
@@ -148,9 +140,7 @@ async def main(address: str, out_file: str = "ble_handshake.txt") -> None:
                     frame=frame,
                     decoded=decoded,
                 ),
-                on_notify=lambda sender, payload: emit(
-                    f"{ts()} NOTIFY sender={sender} hex={payload.hex()} raw={payload!r}"
-                ),
+                on_notify=log_notify,
                 on_frame=lambda frame: emit(
                     f"{ts()} FRAME channel={frame.channel.name} end={frame.end_of_channel} hex={frame.payload.hex()}"
                 ),
@@ -177,7 +167,7 @@ def cli() -> None:
         raise SystemExit(2)
 
     address = sys.argv[1]
-    output = sys.argv[2] if len(sys.argv) == 3 else "ble_handshake.txt"
+    output = sys.argv[2] if len(sys.argv) == 3 else f"ble_handshake-{ts()}.txt"
     try:
         asyncio.run(main(address, output))
     except KeyboardInterrupt:

@@ -5,12 +5,14 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from enum import StrEnum
 import json
-import os
+import subprocess
+import sys
 from pathlib import Path
 from rich.text import Text
 from typing import Any
 
 from bleak import BleakScanner
+from bosch_ble._common import normalize_address
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal
@@ -65,10 +67,6 @@ class SortMode(StrEnum):
 
 STALE_AFTER_SECONDS = 30.0
 DEFAULT_IGNORE_STORE_PATH = Path.home() / ".bosch-ble" / "ignored_devices.json"
-
-
-def normalize_address(address: str) -> str:
-    return address.upper()
 
 
 def load_ignored_addresses(path: Path) -> set[str]:
@@ -474,18 +472,17 @@ class ScannerApp(App[str | None]):
 
 
 def cli() -> None:
-    selected_address: str | None = None
     try:
         selected_address = ScannerApp().run()
     except KeyboardInterrupt:
-        pass
+        return
     finally:
         clear_terminal()
 
     if selected_address is not None:
-        os.execvp(
-            "bosch-ble-dump-gatt",
-            ["bosch-ble-dump-gatt", selected_address],
+        subprocess.run(
+            [sys.executable, "-m", "bosch_ble.dump_gatt", selected_address],
+            check=False,
         )
 
 

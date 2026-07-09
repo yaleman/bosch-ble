@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import errno
+import struct
+
 import pytest
 
 from bosch_ble import mgmt
@@ -67,6 +69,57 @@ def test_parse_args_returns_load_connection_parameters() -> None:
 def test_parse_args_rejects_invalid_argv() -> None:
     with pytest.raises(SystemExit, match="Usage: python -m bosch_ble.mgmt load-conn-params"):
         mgmt.parse_args(["python"])
+
+
+def test_receive_mgmt_response_parses_response_when_preceded_by_other_event() -> None:
+    # An unrelated CMD_STATUS event (different opcode) arrives first in the same
+    # datagram, followed by our CMD_COMPLETE for MGMT_OP_LOAD_CONN_PARAM.
+    other_event = struct.pack("<HHH", mgmt.MGMT_EV_CMD_STATUS, 0, 3) + struct.pack(
+        "<HB", 0x9999, mgmt.MGMT_STATUS_SUCCESS
+    )
+    our_event = struct.pack("<HHH", mgmt.MGMT_EV_CMD_COMPLETE, 0, 3) + struct.pack(
+        "<HB", mgmt.MGMT_OP_LOAD_CONN_PARAM, mgmt.MGMT_STATUS_SUCCESS
+    )
+    buf = other_event + our_event
+
+    class FakeSock:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def recv(self, _n: int) -> bytes:
+            self.calls += 1
+            if self.calls == 1:
+                return buf
+            raise RuntimeError("recv exhausted before finding response")
+
+    event_code, status = mgmt.receive_mgmt_response(FakeSock())
+
+    assert event_code == mgmt.MGMT_EV_CMD_COMPLETE
+    assert status == mgmt.MGMT_STATUS_SUCCESS
+
+
+def test_receive_mgmt_response_handles_partial_event_across_recvs() -> None:
+    our_event = struct.pack("<HHH", mgmt.MGMT_EV_CMD_COMPLETE, 0, 3) + struct.pack(
+        "<HB", mgmt.MGMT_OP_LOAD_CONN_PARAM, mgmt.MGMT_STATUS_SUCCESS
+    )
+
+    class FakeSock:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def recv(self, _n: int) -> bytes:
+            self.calls += 1
+            if self.calls == 1:
+                return our_event[:4]
+            if self.calls == 2:
+                return our_event[4:]
+            raise RuntimeError("recv exhausted")
+
+    event_code, status = mgmt.receive_mgmt_response(FakeSock())
+
+    assert event_code == mgmt.MGMT_EV_CMD_COMPLETE
+    assert status == mgmt.MGMT_STATUS_SUCCESS
+
 
 
 def test_load_connection_parameters_reports_trusted_socket_requirement(

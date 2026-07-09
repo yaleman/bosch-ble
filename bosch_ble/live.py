@@ -60,6 +60,27 @@ def is_bike_handshake(commands: list[mcsp.Command]) -> bool:
     return version_ok and max_packet_seen and advanced_channels == set(NON_COMMAND_CHANNELS)
 
 
+def summarize_packet(payload: bytes) -> str:
+    try:
+        frames = mcsp.split_frames(payload)
+    except Exception:
+        return payload.hex()
+    summaries: list[str] = []
+    for frame in frames:
+        if frame.channel is mcsp.McspChannel.COMMAND:
+            try:
+                summaries.append(f"CMD {mcsp.decode_command_frame(frame)!r}")
+            except Exception:
+                summaries.append(f"cmd {frame.payload.hex()}")
+            continue
+        try:
+            decoded = messagebus.decode_message_frame(frame.payload)
+            summaries.append(messagebus.format_message_frame(decoded))
+        except Exception:
+            summaries.append(frame.payload.hex())
+    return " | ".join(summaries)
+
+
 def build_handshake_response(
     commands: list[mcsp.Command],
     local_packet_size: int = mcsp.DEFAULT_MAX_PACKET_SIZE,
@@ -95,9 +116,10 @@ async def connected_client(address: str, timeout: float = 20.0):
                     raise RuntimeError("Failed to connect")
                 try:
                     await dump_gatt.stage_bosch_security(client, address)
-                except RuntimeError as exc:
-                    if str(exc) != "Bosch security descriptor was not found.":
-                        raise
+                except dump_gatt.BoschSecurityDescriptorMissing:
+                    pass
+                except RuntimeError:
+                    raise
                 yield client
                 return
         except Exception as exc:

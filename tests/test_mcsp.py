@@ -607,22 +607,18 @@ def test_handshake_main_only_stops_notify_once(
 
 def test_build_startup_response_packets_answers_reads_and_subscribes() -> None:
     read_packets = handshake.build_startup_response_packets(
-        messagebus=mcsp.encode_frame(
-            mcsp.Frame(
+        frame=mcsp.Frame(
                 end_of_channel=True,
                 channel=mcsp.McspChannel.CHANNEL1,
                 payload=bytes.fromhex("2150c09f01"),
             )
-        )
     )
     subscribe_packets = handshake.build_startup_response_packets(
-        messagebus=mcsp.encode_frame(
-            mcsp.Frame(
+        frame=mcsp.Frame(
                 end_of_channel=True,
                 channel=mcsp.McspChannel.CHANNEL1,
                 payload=bytes.fromhex("2002c0a360"),
             )
-        )
     )
 
     assert [packet.hex() for packet in read_packets] == ["3007409fa150110801"]
@@ -634,13 +630,11 @@ def test_build_startup_response_packets_answers_reads_and_subscribes() -> None:
 
 def test_build_startup_response_packets_answers_visualizable_issue_types() -> None:
     packets = handshake.build_startup_response_packets(
-        messagebus=mcsp.encode_frame(
-            mcsp.Frame(
+        frame=mcsp.Frame(
                 end_of_channel=True,
                 channel=mcsp.McspChannel.CHANNEL1,
                 payload=bytes.fromhex("2150c09d01"),
             )
-        )
     )
 
     assert [packet.hex() for packet in packets] == ["300d409da150110800080108020803"]
@@ -648,13 +642,11 @@ def test_build_startup_response_packets_answers_visualizable_issue_types() -> No
 
 def test_build_startup_response_packets_answers_unsubscribes() -> None:
     packets = handshake.build_startup_response_packets(
-        messagebus=mcsp.encode_frame(
-            mcsp.Frame(
+        frame=mcsp.Frame(
                 end_of_channel=True,
                 channel=mcsp.McspChannel.CHANNEL1,
                 payload=bytes.fromhex("2002c08184"),
             )
-        )
     )
 
     assert [packet.hex() for packet in packets] == ["30054081a00294"]
@@ -662,13 +654,11 @@ def test_build_startup_response_packets_answers_unsubscribes() -> None:
 
 def test_build_startup_response_packets_answers_update_issue_visualization_rpc() -> None:
     packets = handshake.build_startup_response_packets(
-        messagebus=mcsp.encode_frame(
-            mcsp.Frame(
+        frame=mcsp.Frame(
                 end_of_channel=True,
                 channel=mcsp.McspChannel.CHANNEL1,
                 payload=bytes.fromhex("2150c09c41"),
             )
-        )
     )
 
     assert [packet.hex() for packet in packets] == ["3005409ca15051"]
@@ -676,13 +666,11 @@ def test_build_startup_response_packets_answers_update_issue_visualization_rpc()
 
 def test_build_startup_response_packets_answers_location_read() -> None:
     packets = handshake.build_startup_response_packets(
-        messagebus=mcsp.encode_frame(
-            mcsp.Frame(
+        frame=mcsp.Frame(
                 end_of_channel=True,
                 channel=mcsp.McspChannel.CHANNEL1,
                 payload=bytes.fromhex("2150c0a001"),
             )
-        )
     )
 
     assert [packet.hex() for packet in packets] == ["300540a0a15011"]
@@ -690,13 +678,11 @@ def test_build_startup_response_packets_answers_location_read() -> None:
 
 def test_build_startup_response_packets_answers_navigation_advice_subscribe() -> None:
     packets = handshake.build_startup_response_packets(
-        messagebus=mcsp.encode_frame(
-            mcsp.Frame(
+        frame=mcsp.Frame(
                 end_of_channel=True,
                 channel=mcsp.McspChannel.CHANNEL1,
                 payload=bytes.fromhex("2002c0a160"),
             )
-        )
     )
 
     assert [packet.hex() for packet in packets] == [
@@ -707,13 +693,11 @@ def test_build_startup_response_packets_answers_navigation_advice_subscribe() ->
 
 def test_build_startup_response_packets_answers_get_altitude_graph_rpc() -> None:
     packets = handshake.build_startup_response_packets(
-        messagebus=mcsp.encode_frame(
-            mcsp.Frame(
+        frame=mcsp.Frame(
                 end_of_channel=True,
                 channel=mcsp.McspChannel.CHANNEL1,
                 payload=bytes.fromhex("2150c09b41"),
             )
-        )
     )
 
     assert [packet.hex() for packet in packets] == ["3005409ba15051"]
@@ -721,13 +705,11 @@ def test_build_startup_response_packets_answers_get_altitude_graph_rpc() -> None
 
 def test_build_startup_response_packets_returns_unsupported_for_unmapped_request() -> None:
     packets = handshake.build_startup_response_packets(
-        messagebus=mcsp.encode_frame(
-            mcsp.Frame(
+        frame=mcsp.Frame(
                 end_of_channel=True,
                 channel=mcsp.McspChannel.CHANNEL1,
                 payload=bytes.fromhex("2002c0ff61"),
             )
-        )
     )
 
     assert [packet.hex() for packet in packets] == ["300640ff20027104"]

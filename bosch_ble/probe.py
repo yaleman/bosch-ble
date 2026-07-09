@@ -4,13 +4,13 @@ from __future__ import annotations
 import asyncio
 import signal
 import sys
-from datetime import datetime
 from pathlib import Path
 from typing import Any
 
 from bleak import BleakClient
 
 from bosch_ble import live
+from bosch_ble._common import format_cli_error, ts
 
 
 PROBE_TARGET_UUIDS = (
@@ -28,14 +28,6 @@ PROBE_PAYLOADS = (
 )
 PROBE_DELAY_SECONDS = 1.0
 STOP = asyncio.Event()
-
-
-def ts() -> str:
-    return datetime.now().isoformat(timespec="seconds")
-
-
-def format_cli_error(exc: Exception) -> str:
-    return str(exc) or type(exc).__name__
 
 
 def normalize_uuid(value: object) -> str:
@@ -89,10 +81,10 @@ async def snapshot_reads(
     return values
 
 
-async def main(address: str, out_file: str = "ble_probe.txt") -> None:
+async def main(address: str, out_file: str | None = None) -> None:
     global STOP
     STOP = asyncio.Event()
-    path = Path(out_file)
+    path = Path(out_file or f"ble_probe-{ts()}.txt")
     print(f"Connecting to {address} ...", flush=True)
     print(f"Probing to {path}", flush=True)
 
@@ -176,7 +168,7 @@ def cli() -> None:
         raise SystemExit(2)
 
     address = sys.argv[1]
-    output = sys.argv[2] if len(sys.argv) == 3 else "ble_probe.txt"
+    output = sys.argv[2] if len(sys.argv) == 3 else f"ble_probe-{ts()}.txt"
     try:
         asyncio.run(main(address, output))
     except KeyboardInterrupt:

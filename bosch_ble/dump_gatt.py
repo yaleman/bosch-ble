@@ -9,6 +9,7 @@ from bleak.backends.characteristic import CharacteristicPropertyName
 from bleak.backends.device import BLEDevice
 
 from bosch_ble import bluez
+from bosch_ble._common import format_cli_error
 
 DISCOVERY_RETRY_ATTEMPTS = 3
 REDISCOVERY_TIMEOUT = 10.0
@@ -17,12 +18,12 @@ BOSCH_NOTIFY_CHAR_UUID = "00000011-eaa2-11e9-81b4-2a2ae2dbcce4"
 CCCD_UUID = "00002902-0000-1000-8000-00805f9b34fb"
 
 
+class BoschSecurityDescriptorMissing(RuntimeError):
+    """Raised when the Bosch CCCD security descriptor is absent on the device."""
+
+
 def props_to_str(props: list[str | "CharacteristicPropertyName"]) -> str:
     return ",".join(sorted(props))
-
-
-def format_cli_error(exc: Exception) -> str:
-    return str(exc) or type(exc).__name__
 
 
 def retry_message(error: Exception, address: str) -> str | None:
@@ -50,7 +51,7 @@ def find_bosch_security_descriptor(services: object) -> object:
             for descriptor in getattr(characteristic, "descriptors", []):
                 if normalize_uuid(getattr(descriptor, "uuid", "")) == CCCD_UUID:
                     return descriptor
-    raise RuntimeError("Bosch security descriptor was not found.")
+    raise BoschSecurityDescriptorMissing("Bosch security descriptor was not found.")
 
 
 async def stage_bosch_security(client: BleakClient, address: str) -> None:
@@ -152,9 +153,10 @@ async def main(address: str) -> None:
                     raise RuntimeError("Failed to connect")
                 try:
                     await stage_bosch_security(client, address)
-                except RuntimeError as exc:
-                    if str(exc) != "Bosch security descriptor was not found.":
-                        raise
+                except BoschSecurityDescriptorMissing:
+                    pass
+                except RuntimeError:
+                    raise
 
                 print()
                 print("Services and characteristics")

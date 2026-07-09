@@ -62,7 +62,7 @@ def test_render_dashboard_shows_compact_interpreted_state() -> None:
     assert "Startup    : STAGE9" in rendered
     assert "Assist     : 340" in rendered
     assert "Battery    : 77%" in rendered
-    assert "Speed      : 25 raw" in rendered
+    assert "Speed      : 2.5 km/h" in rendered
     assert "Charger    : unplugged" in rendered
     assert "Recent frames:" in rendered
     assert "WRITE STARTUP_STAGE payload=0809" in rendered

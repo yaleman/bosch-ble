@@ -5,22 +5,14 @@ import signal
 import sys
 from collections import deque
 from dataclasses import dataclass, field
-from datetime import datetime
 
 from bosch_ble import handshake, live, messagebus
+from bosch_ble._common import format_cli_error, ts
 
 
 REFRESH_SECONDS = 1.0
 HANDSHAKE_TIMEOUT_SECONDS = 10.0
 CLEAR_SCREEN = "\x1b[2J\x1b[H"
-
-
-def format_cli_error(exc: Exception) -> str:
-    return str(exc) or type(exc).__name__
-
-
-def ts() -> str:
-    return datetime.now().isoformat(timespec="seconds")
 
 
 def _parse_varint(data: bytes, offset: int = 0) -> tuple[int, int]:
@@ -167,10 +159,13 @@ def _format_percent(value: int | None) -> str:
     return f"{value}%"
 
 
+SPEED_UNITS_PER_RAW = 0.1
+
+
 def _format_speed(value: int | None) -> str:
     if value is None:
         return "unknown"
-    return f"{value} raw"
+    return f"{value * SPEED_UNITS_PER_RAW:.1f} km/h"
 
 
 def _format_charger(value: bool | None) -> str:
