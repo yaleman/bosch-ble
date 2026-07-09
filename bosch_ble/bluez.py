@@ -11,12 +11,17 @@ import tempfile
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Annotated, Any, Literal
+from typing import Annotated, Any, Literal, cast
 from uuid import uuid4
 
 from bleak import BleakScanner
 from bleak.backends.device import BLEDevice
-from bosch_ble._common import format_cli_error, normalize_address
+from bosch_ble._common import (
+    BluezInterface,
+    format_cli_error,
+    normalize_address,
+    validate_address,
+)
 from dbus_fast import DBusError, Variant
 from dbus_fast.annotations import DBusObjectPath, DBusSignature, DBusStr, DBusUInt16, DBusUInt32
 from dbus_fast.aio import MessageBus
@@ -130,6 +135,7 @@ async def run_command_async(
         process.kill()
         await process.communicate()
         raise subprocess.TimeoutExpired(argv, timeout) from exc
+    assert process.returncode is not None
     return subprocess.CompletedProcess(
         argv,
         process.returncode,
@@ -232,11 +238,18 @@ def build_state(
         paired=parse_flag(bluetoothctl_text, "Paired"),
         trusted=parse_flag(bluetoothctl_text, "Trusted"),
         connected=parse_flag(bluetoothctl_text, "Connected"),
-        services_resolved=parse_flag(busctl_text, "ServicesResolved"),
+        services_resolved=_resolve_services_state(bluetoothctl_text, busctl_text),
         bluetoothctl=bluetoothctl,
         busctl=busctl,
         pairing_advertisement=pairing_advertisement,
     )
+
+
+def _resolve_services_state(bluetoothctl_text: str, busctl_text: str) -> bool | None:
+    resolved = parse_flag(bluetoothctl_text, "ServicesResolved")
+    if resolved is None:
+        resolved = parse_flag(busctl_text, "ServicesResolved")
+    return resolved
 
 
 def read_device_state(
@@ -645,7 +658,7 @@ async def pairing_agent(address: str):
     bus.export(path, agent)
     introspection = await bus.introspect(BLUEZ_SERVICE, BLUEZ_ROOT_PATH)
     proxy = bus.get_proxy_object(BLUEZ_SERVICE, BLUEZ_ROOT_PATH, introspection)
-    manager = proxy.get_interface(BLUEZ_AGENT_MANAGER_INTERFACE)
+    manager = cast(BluezInterface, proxy.get_interface(BLUEZ_AGENT_MANAGER_INTERFACE))
     log_agent_event(f"register {path} capability={BLUEZ_AGENT_CAPABILITY} address={address}")
     await manager.call_register_agent(path, BLUEZ_AGENT_CAPABILITY)
     try:
@@ -677,7 +690,7 @@ async def bluez_pair_device(address: str) -> subprocess.CompletedProcess[str]:
     try:
         introspection = await bus.introspect(BLUEZ_SERVICE, device_path)
         proxy = bus.get_proxy_object(BLUEZ_SERVICE, device_path, introspection)
-        device = proxy.get_interface(BLUEZ_DEVICE_INTERFACE)
+        device = cast(BluezInterface, proxy.get_interface(BLUEZ_DEVICE_INTERFACE))
         await device.call_pair()
     except Exception as exc:
         return subprocess.CompletedProcess(
@@ -713,7 +726,7 @@ async def bluez_set_trusted(address: str, trusted: bool = True) -> subprocess.Co
     try:
         introspection = await bus.introspect(BLUEZ_SERVICE, device_path)
         proxy = bus.get_proxy_object(BLUEZ_SERVICE, device_path, introspection)
-        props = proxy.get_interface(DBUS_PROPERTIES_INTERFACE)
+        props = cast(BluezInterface, proxy.get_interface(DBUS_PROPERTIES_INTERFACE))
         await props.call_set(BLUEZ_DEVICE_INTERFACE, "Trusted", Variant("b", trusted))
     except Exception as exc:
         return subprocess.CompletedProcess(
@@ -1029,14 +1042,6 @@ async def wait_for_state(
             return False
         return True
 
-    while True:
-        if matches(last_state):
-            return last_state
-        if loop.time() >= deadline:
-            break
-        await asyncio.sleep(interval)
-        last_state = read_device_state(address)
-
     expected_flags: list[str] = []
     if paired is not None:
         expected_flags.append(f"paired={paired}")
@@ -1045,6 +1050,18 @@ async def wait_for_state(
     if target_services_resolved is not None:
         expected_flags.append(f"services_resolved={target_services_resolved}")
     expected = ", ".join(expected_flags) if expected_flags else "requested state"
+
+    if not matches(last_state):
+        print(f"Waiting for {expected} on {address} (up to {timeout:0.0f}s) ...")
+
+    while True:
+        if matches(last_state):
+            return last_state
+        if loop.time() >= deadline:
+            break
+        await asyncio.sleep(interval)
+        last_state = read_device_state(address)
+
     raise RuntimeError(f"BlueZ did not reach {expected} for {address}.")
 
 
@@ -1151,7 +1168,7 @@ def info_cli() -> None:
         print(f"Usage: {sys.argv[0]} <BLE_ADDRESS>")
         raise SystemExit(2)
 
-    address = sys.argv[1]
+    address = validate_address(sys.argv[1])
     devices = run_command(["bluetoothctl", "devices"])
     print_section("bluetoothctl devices", devices)
 
@@ -1166,8 +1183,9 @@ def preflight_cli() -> None:
         print(f"Usage: {sys.argv[0]} <BLE_ADDRESS>")
         raise SystemExit(2)
 
+    address = validate_address(sys.argv[1])
     try:
-        state = asyncio.run(preflight_device(sys.argv[1]))
+        state = asyncio.run(preflight_device(address))
         print_preflight_report(state)
     except KeyboardInterrupt:
         raise SystemExit(130)
@@ -1181,8 +1199,8 @@ def diagnose_pair_cli() -> None:
         print(f"Usage: {sys.argv[0]} <BLE_ADDRESS>")
         raise SystemExit(2)
 
-    address = sys.argv[1]
-    attempts = [
+    address = validate_address(sys.argv[1])
+    attempts: list[tuple[Literal["dbus", "btmgmt"], bool]] = [
         ("dbus", False),
         ("dbus", True),
         ("btmgmt", False),
@@ -1208,11 +1226,12 @@ def connect_cli() -> None:
         print(f"Usage: {sys.argv[0]} <BLE_ADDRESS>")
         raise SystemExit(2)
 
+    address = validate_address(sys.argv[1])
     try:
         discovering = controller_discovering_state()
         print(f"ControllerDiscovering: {format_flag(discovering)}")
-        assert_controller_ready(sys.argv[1], discovering=discovering)
-        asyncio.run(connect_device(sys.argv[1], verbose=True))
+        assert_controller_ready(address, discovering=discovering)
+        asyncio.run(connect_device(address, verbose=True))
     except KeyboardInterrupt:
         raise SystemExit(130)
     except Exception as exc:
@@ -1225,7 +1244,7 @@ def wait_services_cli() -> None:
         print(f"Usage: {sys.argv[0]} <BLE_ADDRESS>")
         raise SystemExit(2)
 
-    address = sys.argv[1]
+    address = validate_address(sys.argv[1])
     print(f"Waiting for services to resolve for {address} ...")
     try:
         asyncio.run(wait_for_services(address))

@@ -63,6 +63,8 @@ Command = (
     | MaxSegmentationPacketCommand
 )
 
+_VALID_COMMAND_TYPES = {command_type.value for command_type in CommandType}
+
 
 def decode_frame(data: bytes) -> Frame:
     if len(data) < 2:
@@ -111,7 +113,10 @@ def encode_frame(frame: Frame) -> bytes:
 def decode_command(payload: bytes) -> Command:
     if not payload:
         raise ValueError("MCSP command payload is empty.")
-    command_type = CommandType(payload[0])
+    command_type = payload[0]
+    if command_type not in _VALID_COMMAND_TYPES:
+        raise ValueError(f"Unsupported MCSP command type: 0x{command_type:02x}")
+    command_type = CommandType(command_type)
     if command_type is CommandType.VERSION:
         if len(payload) < 2:
             raise ValueError("VERSION command is truncated.")

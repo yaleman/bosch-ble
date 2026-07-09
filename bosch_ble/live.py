@@ -8,6 +8,7 @@ from typing import Any, Callable
 from bleak import BleakClient
 
 from bosch_ble import dump_gatt, mcsp, messagebus
+from bosch_ble._common import normalize_uuid, Services
 
 
 NON_COMMAND_CHANNELS = tuple(
@@ -23,18 +24,14 @@ NotifyHandler = Callable[[Any, bytes], None]
 SendHandler = Callable[[bytes], None]
 
 
-def normalize_uuid(value: object) -> str:
-    return str(value).lower()
-
-
-def find_mcsp_transport(services: object) -> tuple[str, str]:
+def find_mcsp_transport(services: Services) -> tuple[str, str]:
     receive_uuid: str | None = None
     send_uuid: str | None = None
     for service in services:
-        if normalize_uuid(getattr(service, "uuid", "")) != mcsp.MCSP_SERVICE_UUID:
+        if normalize_uuid(service.uuid) != mcsp.MCSP_SERVICE_UUID:
             continue
-        for char in getattr(service, "characteristics", []):
-            uuid = normalize_uuid(getattr(char, "uuid", ""))
+        for char in service.characteristics:
+            uuid = normalize_uuid(char.uuid)
             if uuid == mcsp.MCSP_RECEIVE_UUID:
                 receive_uuid = uuid
             if uuid == mcsp.MCSP_SEND_UUID:
@@ -180,6 +177,7 @@ class McspLiveSession:
             stop_error = exc
 
         if self._writer_task is not None:
+            join_task: asyncio.Task[None] | None = None
             try:
                 join_task = self._loop.create_task(self._send_queue.join())
                 done, _pending = await asyncio.wait(
@@ -193,7 +191,7 @@ class McspLiveSession:
                     self._send_queue.put_nowait(None)
                     await self._writer_task
             finally:
-                if not join_task.done():
+                if join_task is not None and not join_task.done():
                     join_task.cancel()
                     with suppress(asyncio.CancelledError):
                         await join_task

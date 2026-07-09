@@ -53,6 +53,11 @@ def test_decode_command_frames_parses_bike_handshake_snapshot() -> None:
     ]
 
 
+def test_decode_command_uses_helpful_message_for_unknown_type() -> None:
+    with pytest.raises(ValueError, match="Unsupported MCSP command type: 0x09"):
+        mcsp.decode_command(bytes([0x09, 0x00]))
+
+
 def test_build_handshake_response_matches_android_startup_sequence() -> None:
     commands = mcsp.decode_command_frames(
         bytes.fromhex(
@@ -140,7 +145,7 @@ def test_handshake_main_replies_on_mcsp_transport(
 
     async def run() -> None:
         state = bluez.BluezState(
-            address="AA:BB",
+            address="AA:BB:CC:DD:EE:FF",
             visible=False,
             device=None,
             name="sensor",
@@ -159,7 +164,7 @@ def test_handshake_main_replies_on_mcsp_transport(
                     new=AsyncMock(),
                 ):
                     with patch.object(handshake.live, "BleakClient", FakeClient):
-                        await handshake.main("AA:BB", str(tmp_path / "handshake.log"))
+                        await handshake.main("AA:BB:CC:DD:EE:FF", str(tmp_path / "handshake.log"))
 
     asyncio.run(run())
 
@@ -176,7 +181,7 @@ def test_handshake_main_replies_on_mcsp_transport(
         (send_uuid, bytes.fromhex("10020307"), False),
     ]
     output = capsys.readouterr().out
-    assert "Connecting to AA:BB ..." in output
+    assert "Connecting to AA:BB:CC:DD:EE:FF ..." in output
     assert "RECV command=VersionCommand(version=3)" in output
     assert "SEND hex=10020307" in output
 
@@ -206,7 +211,7 @@ def test_connected_client_retries_transient_service_discovery_disconnect() -> No
 
     async def run() -> None:
         state = bluez.BluezState(
-            address="AA:BB",
+            address="AA:BB:CC:DD:EE:FF",
             visible=False,
             device=None,
             name="sensor",
@@ -221,7 +226,7 @@ def test_connected_client_retries_transient_service_discovery_disconnect() -> No
             with patch.object(live.dump_gatt, "client_target_for_state", return_value=target):
                 with patch.object(live.dump_gatt, "stage_bosch_security", new=AsyncMock()):
                     with patch.object(live, "BleakClient", FakeClient):
-                        async with live.connected_client("AA:BB", timeout=20.0) as client:
+                        async with live.connected_client("AA:BB:CC:DD:EE:FF", timeout=20.0) as client:
                             assert client is not None
 
     asyncio.run(run())
@@ -250,7 +255,7 @@ def test_connected_client_stages_bosch_security() -> None:
 
     async def run() -> None:
         state = bluez.BluezState(
-            address="AA:BB",
+            address="AA:BB:CC:DD:EE:FF",
             visible=False,
             device=None,
             name="sensor",
@@ -265,12 +270,12 @@ def test_connected_client_stages_bosch_security() -> None:
             with patch.object(live.dump_gatt, "client_target_for_state", return_value=target):
                 with patch.object(live.dump_gatt, "stage_bosch_security", new=fake_stage):
                     with patch.object(live, "BleakClient", FakeClient):
-                        async with live.connected_client("AA:BB", timeout=20.0) as client:
+                        async with live.connected_client("AA:BB:CC:DD:EE:FF", timeout=20.0) as client:
                             assert client is not None
 
     asyncio.run(run())
     assert len(staged) == 1
-    assert staged[0][1] == "AA:BB"
+    assert staged[0][1] == "AA:BB:CC:DD:EE:FF"
 
 
 def test_mcsp_live_session_detects_handshake_across_multiple_notifications() -> None:
@@ -413,7 +418,7 @@ def test_handshake_main_logs_non_command_frames_after_handshake(
 
     async def run() -> None:
         state = bluez.BluezState(
-            address="AA:BB",
+            address="AA:BB:CC:DD:EE:FF",
             visible=False,
             device=None,
             name="sensor",
@@ -427,7 +432,7 @@ def test_handshake_main_logs_non_command_frames_after_handshake(
         with patch.object(handshake.live.dump_gatt, "prepare_connection", new=AsyncMock(return_value=state)):
             with patch.object(handshake.live.dump_gatt, "client_target_for_state", return_value=object()):
                 with patch.object(handshake.live, "BleakClient", FakeClient):
-                    await handshake.main("AA:BB", str(tmp_path / "handshake.log"))
+                    await handshake.main("AA:BB:CC:DD:EE:FF", str(tmp_path / "handshake.log"))
 
     asyncio.run(run())
 
@@ -496,7 +501,7 @@ def test_handshake_main_serializes_startup_responses_after_handshake_packets(
 
     async def run() -> None:
         state = bluez.BluezState(
-            address="AA:BB",
+            address="AA:BB:CC:DD:EE:FF",
             visible=False,
             device=None,
             name="sensor",
@@ -510,7 +515,7 @@ def test_handshake_main_serializes_startup_responses_after_handshake_packets(
         with patch.object(handshake.live.dump_gatt, "prepare_connection", new=AsyncMock(return_value=state)):
             with patch.object(handshake.live.dump_gatt, "client_target_for_state", return_value=object()):
                 with patch.object(handshake.live, "BleakClient", FakeClient):
-                    await handshake.main("AA:BB", str(tmp_path / "handshake.log"))
+                    await handshake.main("AA:BB:CC:DD:EE:FF", str(tmp_path / "handshake.log"))
 
     asyncio.run(run())
 
@@ -584,7 +589,7 @@ def test_handshake_main_only_stops_notify_once(
 
     async def run() -> None:
         state = bluez.BluezState(
-            address="AA:BB",
+            address="AA:BB:CC:DD:EE:FF",
             visible=False,
             device=None,
             name="sensor",
@@ -598,7 +603,7 @@ def test_handshake_main_only_stops_notify_once(
         with patch.object(handshake.live.dump_gatt, "prepare_connection", new=AsyncMock(return_value=state)):
             with patch.object(handshake.live.dump_gatt, "client_target_for_state", return_value=object()):
                 with patch.object(handshake.live, "BleakClient", FakeClient):
-                    await handshake.main("AA:BB", str(tmp_path / "handshake.log"))
+                    await handshake.main("AA:BB:CC:DD:EE:FF", str(tmp_path / "handshake.log"))
 
     asyncio.run(run())
 

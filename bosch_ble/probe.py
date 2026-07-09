@@ -10,7 +10,14 @@ from typing import Any
 from bleak import BleakClient
 
 from bosch_ble import live
-from bosch_ble._common import format_cli_error, ts
+from bosch_ble._common import (
+    BleakCharacteristic,
+    format_cli_error,
+    normalize_uuid,
+    Services,
+    ts,
+    validate_address,
+)
 
 
 PROBE_TARGET_UUIDS = (
@@ -30,29 +37,27 @@ PROBE_DELAY_SECONDS = 1.0
 STOP = asyncio.Event()
 
 
-def normalize_uuid(value: object) -> str:
-    return str(value).lower()
-
-
 def is_bosch_uuid(value: object) -> bool:
     return normalize_uuid(value).endswith("-eaa2-11e9-81b4-2a2ae2dbcce4")
 
 
-def probe_write_response(char: object) -> bool:
-    properties = set(getattr(char, "properties", []))
+def probe_write_response(char: BleakCharacteristic) -> bool:
+    properties = set(char.properties)
     return "write" in properties and "write-without-response" not in properties
 
 
-def collect_probe_chars(services: object) -> tuple[list[object], list[object], list[object]]:
-    notify_chars: list[object] = []
-    read_chars: list[object] = []
-    write_chars: list[object] = []
+def collect_probe_chars(
+    services: Services,
+) -> tuple[list[BleakCharacteristic], list[BleakCharacteristic], list[BleakCharacteristic]]:
+    notify_chars: list[BleakCharacteristic] = []
+    read_chars: list[BleakCharacteristic] = []
+    write_chars: list[BleakCharacteristic] = []
     target_uuids = {normalize_uuid(uuid) for uuid in PROBE_TARGET_UUIDS}
 
     for service in services:
-        for char in getattr(service, "characteristics", []):
-            uuid = normalize_uuid(getattr(char, "uuid", ""))
-            props = set(getattr(char, "properties", []))
+        for char in service.characteristics:
+            uuid = normalize_uuid(char.uuid)
+            props = set(char.properties)
             if is_bosch_uuid(uuid) and ("notify" in props or "indicate" in props):
                 notify_chars.append(char)
             if "read" in props:
@@ -65,13 +70,13 @@ def collect_probe_chars(services: object) -> tuple[list[object], list[object], l
 
 async def snapshot_reads(
     client: BleakClient,
-    read_chars: list[object],
+    read_chars: list[BleakCharacteristic],
     emit,
     label: str,
 ) -> dict[str, bytes]:
     values: dict[str, bytes] = {}
     for char in read_chars:
-        uuid = normalize_uuid(getattr(char, "uuid", ""))
+        uuid = normalize_uuid(char.uuid)
         try:
             data = bytes(await client.read_gatt_char(uuid))
             values[uuid] = data
@@ -167,7 +172,7 @@ def cli() -> None:
         print(f"Usage: {sys.argv[0]} <BLE_ADDRESS> [output_file]")
         raise SystemExit(2)
 
-    address = sys.argv[1]
+    address = validate_address(sys.argv[1])
     output = sys.argv[2] if len(sys.argv) == 3 else f"ble_probe-{ts()}.txt"
     try:
         asyncio.run(main(address, output))

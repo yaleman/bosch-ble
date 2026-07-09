@@ -3,13 +3,19 @@ from __future__ import annotations
 
 import asyncio
 import sys
+from typing import Iterable
 
 from bleak import BleakClient
-from bleak.backends.characteristic import CharacteristicPropertyName
 from bleak.backends.device import BLEDevice
 
 from bosch_ble import bluez
-from bosch_ble._common import format_cli_error
+from bosch_ble._common import (
+    BleakDescriptor,
+    format_cli_error,
+    normalize_uuid,
+    Services,
+    validate_address,
+)
 
 DISCOVERY_RETRY_ATTEMPTS = 3
 REDISCOVERY_TIMEOUT = 10.0
@@ -22,8 +28,8 @@ class BoschSecurityDescriptorMissing(RuntimeError):
     """Raised when the Bosch CCCD security descriptor is absent on the device."""
 
 
-def props_to_str(props: list[str | "CharacteristicPropertyName"]) -> str:
-    return ",".join(sorted(props))
+def props_to_str(props: Iterable[object]) -> str:
+    return ",".join(sorted(str(prop) for prop in props))
 
 
 def retry_message(error: Exception, address: str) -> str | None:
@@ -37,19 +43,15 @@ def retry_message(error: Exception, address: str) -> str | None:
     return None
 
 
-def normalize_uuid(value: object) -> str:
-    return str(value).lower()
-
-
-def find_bosch_security_descriptor(services: object) -> object:
+def find_bosch_security_descriptor(services: Services) -> BleakDescriptor:
     for service in services:
-        if normalize_uuid(getattr(service, "uuid", "")) != BOSCH_SERVICE_UUID:
+        if normalize_uuid(service.uuid) != BOSCH_SERVICE_UUID:
             continue
-        for characteristic in getattr(service, "characteristics", []):
-            if normalize_uuid(getattr(characteristic, "uuid", "")) != BOSCH_NOTIFY_CHAR_UUID:
+        for characteristic in service.characteristics:
+            if normalize_uuid(characteristic.uuid) != BOSCH_NOTIFY_CHAR_UUID:
                 continue
-            for descriptor in getattr(characteristic, "descriptors", []):
-                if normalize_uuid(getattr(descriptor, "uuid", "")) == CCCD_UUID:
+            for descriptor in characteristic.descriptors:
+                if normalize_uuid(descriptor.uuid) == CCCD_UUID:
                     return descriptor
     raise BoschSecurityDescriptorMissing("Bosch security descriptor was not found.")
 
@@ -127,7 +129,7 @@ async def prepare_connection(address: str) -> bluez.BluezState:
     )
 
 
-def client_target_for_state(state: bluez.BluezState) -> object:
+def client_target_for_state(state: bluez.BluezState) -> BLEDevice | str:
     if state.device is not None:
         return state.device
     device_path = bluez.find_device_object_path(state.address)
@@ -166,7 +168,7 @@ async def main(address: str) -> None:
                     print(f"[SERVICE] {service.uuid}  ({service.description})")
                     for char in service.characteristics:
                         print(f"  [CHAR] {char.uuid}")
-                        print(f"         properties={props_to_str(char.properties)}")  # ty:ignore[invalid-argument-type]
+                        print(f"         properties={props_to_str(char.properties)}")
                         print(f"         description={char.description}")
 
                         if "read" in char.properties:
@@ -209,8 +211,9 @@ def cli() -> None:
         print(f"Usage: {sys.argv[0]} <BLE_ADDRESS>")
         raise SystemExit(2)
 
+    address = validate_address(sys.argv[1])
     try:
-        asyncio.run(main(sys.argv[1]))
+        asyncio.run(main(address))
     except KeyboardInterrupt:
         raise SystemExit(130)
     except Exception as exc:

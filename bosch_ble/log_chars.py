@@ -8,24 +8,24 @@ from pathlib import Path
 from typing import Any
 
 from bosch_ble import live, mcsp
-from bosch_ble._common import format_cli_error, ts
+from bosch_ble._common import format_cli_error, normalize_uuid, Services, ts, validate_address
 
 
 STOP = asyncio.Event()
 
 
-def collect_log_characteristics(services: object) -> tuple[list[str], list[str]]:
+def collect_log_characteristics(services: Services) -> tuple[list[str], list[str]]:
     notify_chars: list[str] = []
     read_chars: list[str] = []
     for service in services:
-        if str(getattr(service, "uuid", "")).lower() == mcsp.MCSP_SERVICE_UUID:
+        if normalize_uuid(service.uuid) == mcsp.MCSP_SERVICE_UUID:
             continue
-        for char in getattr(service, "characteristics", []):
+        for char in service.characteristics:
             props = set(char.properties)
             if "notify" in props or "indicate" in props:
-                notify_chars.append(str(char.uuid))
+                notify_chars.append(normalize_uuid(char.uuid))
             if "read" in props:
-                read_chars.append(str(char.uuid))
+                read_chars.append(normalize_uuid(char.uuid))
     return notify_chars, read_chars
 
 
@@ -99,7 +99,7 @@ def cli() -> None:
         print(f"Usage: {sys.argv[0]} <BLE_ADDRESS> [output_file]")
         raise SystemExit(2)
 
-    address = sys.argv[1]
+    address = validate_address(sys.argv[1])
     output = sys.argv[2] if len(sys.argv) == 3 else f"ble_log-{ts()}.txt"
     try:
         asyncio.run(main(address, output))

@@ -79,13 +79,13 @@ def test_dashboard_cli_shows_usage_without_address(capsys: pytest.CaptureFixture
 
 def test_dashboard_cli_runs_async_main_with_address() -> None:
     async def fake_main(address: str) -> None:
-        assert address == "AA:BB"
+        assert address == "AA:BB:CC:DD:EE:FF"
 
     with patch.object(dashboard, "main", side_effect=fake_main) as patched_main:
-        with patch("sys.argv", ["bosch-ble-dashboard", "AA:BB"]):
+        with patch("sys.argv", ["bosch-ble-dashboard", "AA:BB:CC:DD:EE:FF"]):
             dashboard.cli()
 
-    patched_main.assert_called_once_with("AA:BB")
+    patched_main.assert_called_once_with("AA:BB:CC:DD:EE:FF")
 
 
 def test_dashboard_cli_prints_friendly_error(capsys: pytest.CaptureFixture[str]) -> None:
@@ -93,12 +93,12 @@ def test_dashboard_cli_prints_friendly_error(capsys: pytest.CaptureFixture[str])
         raise RuntimeError(f"bad dashboard for {address}")
 
     with patch.object(dashboard, "main", side_effect=fake_main):
-        with patch("sys.argv", ["bosch-ble-dashboard", "AA:BB"]):
+        with patch("sys.argv", ["bosch-ble-dashboard", "AA:BB:CC:DD:EE:FF"]):
             with pytest.raises(SystemExit) as excinfo:
                 dashboard.cli()
 
     assert excinfo.value.code == 1
-    assert capsys.readouterr().err == "Error: bad dashboard for AA:BB\n"
+    assert capsys.readouterr().err == "Error: bad dashboard for AA:BB:CC:DD:EE:FF\n"
 
 
 def test_dashboard_can_render_unknown_state() -> None:
@@ -120,6 +120,7 @@ def test_dashboard_main_serializes_startup_responses_after_handshake_packets(
         def __init__(self, uuid: str, properties: list[str]) -> None:
             self.uuid = uuid
             self.properties = properties
+            self.descriptors = []
 
     class FakeService:
         def __init__(self, uuid: str, characteristics: list[FakeCharacteristic]) -> None:
@@ -181,7 +182,7 @@ def test_dashboard_main_serializes_startup_responses_after_handshake_packets(
 
     async def run() -> None:
         state = bluez.BluezState(
-            address="AA:BB",
+            address="AA:BB:CC:DD:EE:FF",
             visible=False,
             device=None,
             name="sensor",
@@ -198,7 +199,7 @@ def test_dashboard_main_serializes_startup_responses_after_handshake_packets(
                     stop = asyncio.Event()
                     stop.set()
                     with patch("bosch_ble.dashboard.asyncio.Event", return_value=stop):
-                        await dashboard.main("AA:BB")
+                        await dashboard.main("AA:BB:CC:DD:EE:FF")
 
     asyncio.run(run())
 

@@ -480,6 +480,7 @@ def cli() -> None:
         clear_terminal()
 
     if selected_address is not None:
+        print(f"Connecting to {selected_address} (may prompt for pairing) ...")
         subprocess.run(
             [sys.executable, "-m", "bosch_ble.dump_gatt", selected_address],
             check=False,

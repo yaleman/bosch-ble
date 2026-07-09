@@ -166,10 +166,10 @@ def test_build_detail_lines_includes_all_advertisement_sections() -> None:
         service_data={"feed": bytes.fromhex("0A0B0C")},
     )
 
-    lines = build_detail_lines("AA:BB", device, now=datetime.now())
+    lines = build_detail_lines("AA:BB:CC:DD:EE:FF", device, now=datetime.now())
 
     assert "Name: sensor" in lines
-    assert "Address: AA:BB" in lines
+    assert "Address: AA:BB:CC:DD:EE:FF" in lines
     assert "UUIDs:" in lines
     assert "1234" in lines
     assert "Manufacturer Data:" in lines
@@ -383,7 +383,7 @@ def test_cli_runs_dump_gatt_as_subprocess_for_selected_address() -> None:
     class FakeApp:
         def run(self) -> str:
             events.append("run")
-            return "AA:BB"
+            return "AA:BB:CC:DD:EE:FF"
 
     with patch("bosch_ble.scan.ScannerApp", return_value=FakeApp()):
         with patch(
@@ -400,7 +400,7 @@ def test_cli_runs_dump_gatt_as_subprocess_for_selected_address() -> None:
         "clear",
         (
             "subprocess",
-            ([sys.executable, "-m", "bosch_ble.dump_gatt", "AA:BB"],),
+            ([sys.executable, "-m", "bosch_ble.dump_gatt", "AA:BB:CC:DD:EE:FF"],),
             {"check": False},
         ),
     ]

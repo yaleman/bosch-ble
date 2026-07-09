@@ -7,7 +7,7 @@ import sys
 from pathlib import Path
 
 from bosch_ble import live, mcsp, messagebus as messagebus_mod
-from bosch_ble._common import format_cli_error, ts
+from bosch_ble._common import format_cli_error, ts, validate_address
 
 
 HANDSHAKE_TIMEOUT_SECONDS = 10.0
@@ -166,7 +166,7 @@ def cli() -> None:
         print(f"Usage: {sys.argv[0]} <BLE_ADDRESS> [output_file]")
         raise SystemExit(2)
 
-    address = sys.argv[1]
+    address = validate_address(sys.argv[1])
     output = sys.argv[2] if len(sys.argv) == 3 else f"ble_handshake-{ts()}.txt"
     try:
         asyncio.run(main(address, output))

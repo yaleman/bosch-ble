@@ -22,6 +22,7 @@
 - Keep changes direct and prefer editing the existing scripts.
 - Reduce code sprawl while working; do not add layers without a clear need.
 - Use package managers for dependency changes.
+- `ty` (type checker) complaints are real findings, not noise. Pre-existing `ty` errors should not be ignored or suppressed with `# ty:ignore`; treat them as something to fix. Prefer correcting the type over silencing the check.
 - If JavaScript tooling appears, prefer `pnpm`.
 - The remote dev box worktree may be overwritten freely when needed; do not preserve or tiptoe around remote-only changes there.
 - Load `REMOTE_HOST` from the local shell environment via `direnv` before using host-helper scripts or SSH-based workflows.

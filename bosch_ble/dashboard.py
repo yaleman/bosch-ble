@@ -7,7 +7,7 @@ from collections import deque
 from dataclasses import dataclass, field
 
 from bosch_ble import handshake, live, messagebus
-from bosch_ble._common import format_cli_error, ts
+from bosch_ble._common import format_cli_error, ts, validate_address
 
 
 REFRESH_SECONDS = 1.0
@@ -250,7 +250,7 @@ def cli() -> None:
         print(f"Usage: {sys.argv[0]} <BLE_ADDRESS>")
         raise SystemExit(2)
 
-    address = sys.argv[1]
+    address = validate_address(sys.argv[1])
     try:
         asyncio.run(main(address))
     except KeyboardInterrupt:
