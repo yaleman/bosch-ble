@@ -1,0 +1,61 @@
+# ESPHome Bluetooth Proxy for Bosch eBike BLE
+#
+# Proxies BLE through an ESP32 so bleak-esphome can connect to the bike
+# from Linux, bypassing the BlueZ SMP key distribution mismatch.
+#
+# Flash:  esphome run esphome/bosch-ble-proxy.yaml
+# Setup:  copy esphome/secrets.yaml.example -> esphome/secrets.yaml and edit
+
+esphome:
+  name: bosch-ble-proxy
+  friendly_name: Bosch BLE Proxy
+
+esp32:
+  board: esp32dev
+  framework:
+    type: esp-idf
+
+logger:
+  level: INFO
+
+api:
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+  power_save_mode: LIGHT
+  ap:
+    ssid: "Bosch BLE Proxy"
+    password: "boschbleproxy"
+
+ota:
+  - platform: esphome
+
+bluetooth_proxy:
+  active: true
+
+time:
+  - platform: sntp
+    id: sntp_time
+
+sensor:
+  - platform: wifi_signal
+    name: "WiFi Signal"
+    update_interval: 60s
+    id: wifi_signal_db
+  - platform: copy
+    source_id: wifi_signal_db
+    name: "WiFi Signal Percent"
+    filters:
+      - lambda: return min(max(2 * (x + 100.0), 0.0), 100.0);
+    unit_of_measurement: "%"
+    entity_category: "diagnostic"
+
+text_sensor:
+  - platform: wifi_info
+    ip_address:
+      name: "IP Address"
+
+button:
+  - platform: restart
+    name: "Restart"

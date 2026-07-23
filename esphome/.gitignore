@@ -1,0 +1,6 @@
+# ESPHome secrets - never commit
+secrets.yaml
+
+# ESPHome build artifacts
+.built/
+.upload/
