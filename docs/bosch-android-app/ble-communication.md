@@ -1,6 +1,8 @@
 # BLE Communication
 
-The Bosch eBike Flow app communicates with the eBike via Bluetooth Low Energy (BLE). This document covers the complete BLE stack from low-level GATT operations to the high-level MessageBus API used by feature modules.
+The Bosch eBike Flow app communicates with the eBike via Bluetooth Low Energy
+(BLE). This document covers the complete BLE stack from low-level GATT
+operations to the high-level MessageBus API used by feature modules.
 
 ## BLE Stack Architecture
 
@@ -37,78 +39,91 @@ The Bosch eBike Flow app communicates with the eBike via Bluetooth Low Energy (B
 
 The primary bidirectional data channel between the app and the bike.
 
-| Role | UUID |
-|---|---|
-| **Service** | `00000010-EAA2-11E9-81B4-2A2AE2DBCCE4` |
+| Role                                                     | UUID                                   |
+| -------------------------------------------------------- | -------------------------------------- |
+| **Service**                                              | `00000010-EAA2-11E9-81B4-2A2AE2DBCCE4` |
 | **Receive Characteristic** (bike → phone, notifications) | `00000011-EAA2-11E9-81B4-2A2AE2DBCCE4` |
-| **Send Characteristic** (phone → bike, write) | `00000012-EAA2-11E9-81B4-2A2AE2DBCCE4` |
+| **Send Characteristic** (phone → bike, write)            | `00000012-EAA2-11E9-81B4-2A2AE2DBCCE4` |
 
-**Location:** `smali_classes3/com/bosch/ebike/communicationstack/McspGattConfig.smali`
+**Location:**
+`smali_classes3/com/bosch/ebike/communicationstack/McspGattConfig.smali`
 
-All MessageBus traffic (read/write/subscribe/RPC) flows through these two characteristics. The app writes commands to the Send characteristic and receives responses/notifications on the Receive characteristic.
+All MessageBus traffic (read/write/subscribe/RPC) flows through these two
+characteristics. The app writes commands to the Send characteristic and receives
+responses/notifications on the Receive characteristic.
 
 ### BES3 (Bosch eBike System 3)
 
 A Bosch-proprietary service used for **BLE scan filtering** in background mode.
 
-| Role | UUID |
-|---|---|
+| Role        | UUID                                   |
+| ----------- | -------------------------------------- |
 | **Service** | `0000FE02-0000-1000-8000-00805F9B34FB` |
 
-**Location:** `smali_classes3/com/bosch/ebike/bluetoothcommunication/config/bes3/Bes3EbikeGattService.smali`
+**Location:**
+`smali_classes3/com/bosch/ebike/bluetoothcommunication/config/bes3/Bes3EbikeGattService.smali`
 
-This 16-bit UUID (`0xFE02`) is used as the scan filter service UUID in `BluetoothLeBackgroundScanner`. The background scan only wakes the app when a device advertising this service UUID is detected.
+This 16-bit UUID (`0xFE02`) is used as the scan filter service UUID in
+`BluetoothLeBackgroundScanner`. The background scan only wakes the app when a
+device advertising this service UUID is detected.
 
 ### COBI (COBI Bike Integration)
 
 Legacy integration for COBI bike systems.
 
-| Device | Service UUID |
-|---|---|
+| Device | Service UUID                           |
+| ------ | -------------------------------------- |
 | CUI050 | `C0B11800-FEE1-C001-FEE1-FA57FEE15AFE` |
 | CUI100 | `C0B11802-FEE1-C001-FEE1-FA57FEE15AFE` |
 
-**Location:** `smali_classes3/com/bosch/ebike/bluetoothcommunication/config/cobi/CobiGattConfig.smali`
+**Location:**
+`smali_classes3/com/bosch/ebike/bluetoothcommunication/config/cobi/CobiGattConfig.smali`
 
 ### Heart Rate Monitor
 
 Standard Bluetooth SIG Heart Rate Service for external HR sensors.
 
-| Role | UUID |
-|---|---|
+| Role        | UUID                                   |
+| ----------- | -------------------------------------- |
 | **Service** | `0000180D-0000-1000-8000-00805F9B34FB` |
 
-**Location:** `smali_classes3/com/bosch/ebike/bluetoothcommunication/config/heartratemonitor/HeartRateMonitorGattService.smali`
+**Location:**
+`smali_classes3/com/bosch/ebike/bluetoothcommunication/config/heartratemonitor/HeartRateMonitorGattService.smali`
 
 ### Standard GATT Descriptors
 
-| Name | UUID |
-|---|---|
+| Name                                      | UUID                                   |
+| ----------------------------------------- | -------------------------------------- |
 | Client Characteristic Configuration (CCC) | `00002902-0000-1000-8000-00805f9b34fb` |
-| Client Characteristic Description | `00002901-0000-1000-8000-00805f9b34fb` |
-| GATT Database Hash | `00002B2A-0000-1000-8000-00805F9B34FB` |
+| Client Characteristic Description         | `00002901-0000-1000-8000-00805f9b34fb` |
+| GATT Database Hash                        | `00002B2A-0000-1000-8000-00805F9B34FB` |
 
 ## Connection Lifecycle
 
 ### 1. App Initialization
 
-When the app starts, `App.onCreate()` initializes Koin and starts the pocket mode services. The `KeepPrimaryBikeConnected` AppExtension begins observing the primary bike and connection triggers.
+When the app starts, `App.onCreate()` initializes Koin and starts the pocket
+mode services. The `KeepPrimaryBikeConnected` AppExtension begins observing the
+primary bike and connection triggers.
 
-**Key file:** `smali_classes4/com/bosch/ebike/pocketmode/services/core/KeepPrimaryBikeConnected.smali`
+**Key file:**
+`smali_classes4/com/bosch/ebike/pocketmode/services/core/KeepPrimaryBikeConnected.smali`
 
 ### 2. Background Auto-Reconnection (Pocket Mode)
 
-The app maintains a persistent connection to the primary bike using **Pocket Mode** -- Bosch's term for background auto-reconnection.
+The app maintains a persistent connection to the primary bike using **Pocket
+Mode** -- Bosch's term for background auto-reconnection.
 
 **Pocket Mode Strategies:**
 
-| Strategy | Mechanism | When Used |
-|---|---|---|
-| `BackgroundScan` | BLE background scan with PendingIntent | Default strategy |
+| Strategy                            | Mechanism                               | When Used                   |
+| ----------------------------------- | --------------------------------------- | --------------------------- |
+| `BackgroundScan`                    | BLE background scan with PendingIntent  | Default strategy            |
 | `CompanionDeviceAssociationMissing` | Companion Device Manager (CDM) presence | When CDM association exists |
-| `BackgroundScanPlusCompanionDevice` | Both BLE scan + CDM | Optimal/ideal state |
+| `BackgroundScanPlusCompanionDevice` | Both BLE scan + CDM                     | Optimal/ideal state         |
 
 **Key files:**
+
 - `smali_classes4/com/bosch/ebike/pocketmode/services/PocketModeStrategy.smali`
 - `smali_classes4/com/bosch/ebike/pocketmode/services/DefaultGetPocketModeStrategy.smali`
 - `smali_classes4/com/bosch/ebike/pocketmode/services/optimal/DefaultPocketModeReconnection.smali`
@@ -118,26 +133,34 @@ The app maintains a persistent connection to the primary bike using **Pocket Mod
 Uses Android's `BluetoothLeScanner.startScan()` with:
 
 **Scan Filter:**
+
 - Device MAC address (primary bike)
 - Service UUID: `0000FE02-0000-1000-8000-00805F9B34FB` (BES3)
 
 **Scan Settings:**
+
 - `callbackType = CALLBACK_TYPE_FIRST_MATCH` (1)
 - `matchMode = MATCH_MODE_STICKY` (2)
 - `setLegacy(true)`
-- `scanMode = SCAN_MODE_LOW_POWER` (0) on API 28+, `SCAN_MODE_BALANCED` (1) below
+- `scanMode = SCAN_MODE_LOW_POWER` (0) on API 28+, `SCAN_MODE_BALANCED` (1)
+  below
 
 **Callback:** PendingIntent targeting `BackgroundScanReceiver`
 
-**Key file:** `smali_classes4/com/bosch/ebike/pocketmode/services/optimal/backgroundscan/BluetoothLeBackgroundScanner.smali`
+**Key file:**
+`smali_classes4/com/bosch/ebike/pocketmode/services/optimal/backgroundscan/BluetoothLeBackgroundScanner.smali`
 
 #### Companion Device Manager
 
-The bike is registered as a **Companion Device** via Android's `CompanionDeviceManager`. When the bike is detected nearby, Android calls `CompanionBikeService.onDeviceAppeared()`.
+The bike is registered as a **Companion Device** via Android's
+`CompanionDeviceManager`. When the bike is detected nearby, Android calls
+`CompanionBikeService.onDeviceAppeared()`.
 
-**Key file:** `smali_classes4/com/bosch/ebike/pocketmode/services/optimal/companiondevice/CompanionBikeService.smali`
+**Key file:**
+`smali_classes4/com/bosch/ebike/pocketmode/services/optimal/companiondevice/CompanionBikeService.smali`
 
 **Manifest declarations:**
+
 ```xml
 <uses-feature android:name="android.software.companion_device_setup"/>
 <uses-permission android:name="android.permission.REQUEST_COMPANION_RUN_IN_BACKGROUND"/>
@@ -168,57 +191,68 @@ ShouldConnectManager (aggregates multiple FlowProvider sources)
        Emits: ConnectReason.AppUiShown
 ```
 
-When any `ConnectReason` fires, `DefaultPocketModeReconnection.triggerConnectionTo()` initiates the connection.
+When any `ConnectReason` fires,
+`DefaultPocketModeReconnection.triggerConnectionTo()` initiates the connection.
 
-**Key file:** `smali_classes4/com/bosch/ebike/pocketmode/services/core/ShouldConnectManager.smali`
+**Key file:**
+`smali_classes4/com/bosch/ebike/pocketmode/services/core/ShouldConnectManager.smali`
 
 ### 4. GATT Connection
 
 `GattWrapperPeripheral` handles the low-level GATT connection:
 
 **Connection sequence:**
+
 1. `connect()` -- Create or reuse `BluetoothGatt` instance
 2. `onConnectedInternallyCompleteSetup()`:
    - `discoverServicesAndLog()` -- Discover all GATT services
-   - `requestMaximumMtuOrDisconnect()` -- Negotiate maximum MTU (up to 512 bytes)
-   - `enableNotifications()` -- Write CCC descriptor (`0x2902`) to enable notifications on MCSP receive characteristic
-   - `detectGattDatabaseChanges()` -- Read GATT Database Hash (`0x2B2A`) to detect if bike's GATT database changed
+   - `requestMaximumMtuOrDisconnect()` -- Negotiate maximum MTU (up to 512
+     bytes)
+   - `enableNotifications()` -- Write CCC descriptor (`0x2902`) to enable
+     notifications on MCSP receive characteristic
+   - `detectGattDatabaseChanges()` -- Read GATT Database Hash (`0x2B2A`) to
+     detect if bike's GATT database changed
    - `onConnectFinalizeSetup()` -- Finalize connection setup
 3. Connection state transitions to `Connected`
 
-**Key file:** `smali_classes3/com/bosch/ebike/bluetoothcommunication/connection/GattWrapperPeripheral.smali`
+**Key file:**
+`smali_classes3/com/bosch/ebike/bluetoothcommunication/connection/GattWrapperPeripheral.smali`
 
 ### 5. Disconnection and Reconnection
 
 When the bike disconnects:
+
 1. `handleBikeDisconnected()` is called
 2. Background scan and CDM observation are restarted
 3. A cool-down period prevents rapid re-triggering
 4. The cycle repeats from step 2
 
 **Error handling:**
+
 - `onBondingDeniedDisconnect()` -- Bonding was denied by user
 - `onBluetoothTurnedOffDisconnect()` -- Bluetooth was turned off
 - `ensureDisconnectOnBikeShutdown()` -- Bike powered off
 
 ## BLE Wrapper Layer
 
-The `ble/wrapper/` package provides a coroutine-friendly wrapper around Android's `BluetoothGatt` API.
+The `ble/wrapper/` package provides a coroutine-friendly wrapper around
+Android's `BluetoothGatt` API.
 
 **Key classes:**
 
-| Class | Purpose |
-|---|---|
-| `GattDevice` | Interface for GATT operations |
-| `GattDeviceImpl` | Implementation wrapping `BluetoothGatt` |
-| `GattCallback` | Converts Android callbacks to Kotlin Flows |
-| `ConnectionState` | Sealed class: Connecting, Connected, Disconnecting, Disconnected |
-| `GattEvent` | Sealed class: CharacteristicRead, CharacteristicChanged, CharacteristicWritten, ServicesDiscovered, MtuChanged |
-| `GattError` | Sealed class: GattTimeoutError, GattException, GattDeviceClosed, GattCallNotSuccessful |
+| Class             | Purpose                                                                                                        |
+| ----------------- | -------------------------------------------------------------------------------------------------------------- |
+| `GattDevice`      | Interface for GATT operations                                                                                  |
+| `GattDeviceImpl`  | Implementation wrapping `BluetoothGatt`                                                                        |
+| `GattCallback`    | Converts Android callbacks to Kotlin Flows                                                                     |
+| `ConnectionState` | Sealed class: Connecting, Connected, Disconnecting, Disconnected                                               |
+| `GattEvent`       | Sealed class: CharacteristicRead, CharacteristicChanged, CharacteristicWritten, ServicesDiscovered, MtuChanged |
+| `GattError`       | Sealed class: GattTimeoutError, GattException, GattDeviceClosed, GattCallNotSuccessful                         |
 
 **Key file:** `smali_classes3/com/bosch/ebike/ble/wrapper/GattDeviceImpl.smali`
 
 **Flow-based API:**
+
 ```kotlin
 // Connection state as a Flow
 val connectionState: Flow<ConnectionState>
@@ -241,6 +275,7 @@ The `communicationstack/` package implements the binary protocol over BLE GATT.
 ### Message Types
 
 **Outbound (phone → bike):**
+
 - `ReadMessage` -- Read a data point value
 - `WriteMessage` -- Write a data point value
 - `SubscribeMessage` -- Subscribe to data point changes
@@ -248,6 +283,7 @@ The `communicationstack/` package implements the binary protocol over BLE GATT.
 - `RpcCallMessage` -- Remote procedure call
 
 **Inbound (bike → phone):**
+
 - `ReadResponseMessage` -- Response to read request
 - `WriteResponseMessage` -- Response to write request
 - `SubscribeResponseMessage` -- Response to subscribe request
@@ -257,20 +293,23 @@ The `communicationstack/` package implements the binary protocol over BLE GATT.
 ### Message Encoding
 
 Messages are encoded as binary payloads:
+
 - **Sequence number** (2 bytes) -- For request/response correlation
 - **Message type** (1 byte) -- Read, Write, Subscribe, etc.
 - **Data point address** (2 bytes) -- Identifies the data point
 - **Payload** (variable) -- Data value or RPC parameters
 
 **Key files:**
+
 - `smali_classes3/com/bosch/ebike/communicationstack/message/MessageEncodingKt.smali`
 - `smali_classes3/com/bosch/ebike/communicationstack/message/MessageDecodingKt.smali`
 
 ### Gateway and Broker
 
-The `Gateway` interface routes messages between the MessageBus and BLE transport:
+The `Gateway` interface routes messages between the MessageBus and BLE
+transport:
 
-```
+```text
 MessageBus (typed DataPoint API)
     ↓
 Broker (message router)
@@ -281,29 +320,32 @@ CommunicationStack (BLE GATT operations)
 ```
 
 **Key files:**
+
 - `smali_classes3/com/bosch/ebike/communicationstack/messagebus/Broker.smali`
 - `smali_classes3/com/bosch/ebike/communicationstack/messagebus/InternalGatewayImpl.smali`
 
 ## MessageBus (Application Layer)
 
-The `messagebus/` package provides the high-level typed API used by feature modules.
+The `messagebus/` package provides the high-level typed API used by feature
+modules.
 
 ### Entity Proxies
 
-The `MessageBus` class exposes 10 entity proxies, one per physical bike component:
+The `MessageBus` class exposes 10 entity proxies, one per physical bike
+component:
 
-| Entity | Represents | Data Points |
-|---|---|---|
-| `DriveUnit` | Motor/drive unit | 200+ (assist modes, speed, torque, cadence, bike light, crash detection) |
-| `Battery` | Primary battery | 80+ (SoC, voltage, temperature, charge cycles) |
-| `Battery2` | Secondary battery | Dual-battery systems |
-| `RemoteControl` | Handlebar remote | 300+ (button events, BLE config, software updates, ride stats) |
-| `HeadUnit` | Display head unit | Tiles, view stripes, brightness, languages |
-| `ConnectModule` | GPS/cellular module | GNSS, modem, remote config |
-| `AntiLockBrakeSystem` | ABS module | Brake events, wheel speeds, ABS modes |
-| `MobileApp` | The phone itself | Location, altitude, heart rate, navigation data (sent TO bike) |
-| `BoschDiagnoseApp` | Diagnostic app | Diagnostic interface |
-| `CanTestNode` | CAN bus test | CAN bus testing |
+| Entity                | Represents          | Data Points                                                              |
+| --------------------- | ------------------- | ------------------------------------------------------------------------ |
+| `DriveUnit`           | Motor/drive unit    | 200+ (assist modes, speed, torque, cadence, bike light, crash detection) |
+| `Battery`             | Primary battery     | 80+ (SoC, voltage, temperature, charge cycles)                           |
+| `Battery2`            | Secondary battery   | Dual-battery systems                                                     |
+| `RemoteControl`       | Handlebar remote    | 300+ (button events, BLE config, software updates, ride stats)           |
+| `HeadUnit`            | Display head unit   | Tiles, view stripes, brightness, languages                               |
+| `ConnectModule`       | GPS/cellular module | GNSS, modem, remote config                                               |
+| `AntiLockBrakeSystem` | ABS module          | Brake events, wheel speeds, ABS modes                                    |
+| `MobileApp`           | The phone itself    | Location, altitude, heart rate, navigation data (sent TO bike)           |
+| `BoschDiagnoseApp`    | Diagnostic app      | Diagnostic interface                                                     |
+| `CanTestNode`         | CAN bus test        | CAN bus testing                                                          |
 
 ### DataPoint Types
 
@@ -332,9 +374,11 @@ interface CallableDataPoint : DataPoint<*> {
 
 ### Addressing
 
-Each entity has an `Addresses` enum with hundreds of named addresses. For example:
+Each entity has an `Addresses` enum with hundreds of named addresses. For
+example:
 
 **DriveUnitAddresses:**
+
 - `BIKE_SPEED`
 - `ASSIST_MODE`
 - `MOTOR_TORQUE`
@@ -343,6 +387,7 @@ Each entity has an `Addresses` enum with hundreds of named addresses. For exampl
 - `ODO_METER`
 
 **BatteryAddresses:**
+
 - `STATE_OF_CHARGE`
 - `VOLTAGE`
 - `CURRENT`
@@ -350,6 +395,7 @@ Each entity has an `Addresses` enum with hundreds of named addresses. For exampl
 - `CHARGE_CYCLES`
 
 **Key files:**
+
 - `smali_classes4/com/bosch/ebike/messagebus/MessageBus.smali`
 - `smali_classes4/com/bosch/ebike/messagebus/constants/DriveUnitAddresses.smali`
 - `smali_classes4/com/bosch/ebike/messagebus/constants/BatteryAddresses.smali`
@@ -377,7 +423,9 @@ val info = messageBus.DriveUnit.driveUnitInfo.read()
 
 ## BES3 Protobuf Data Model
 
-The `bes3/` package defines the Protocol Buffers schema for all bike data. This is the canonical data model used for:
+The `bes3/` package defines the Protocol Buffers schema for all bike data. This
+is the canonical data model used for:
+
 - BLE communication (MessageBus wire format)
 - Cloud sync (REST API payloads)
 - Activity storage (ride tracking)
@@ -385,7 +433,10 @@ The `bes3/` package defines the Protocol Buffers schema for all bike data. This 
 ### Key Protobuf Messages
 
 **ActivityService:**
-- `ActivityDetails` -- Per-second telemetry: bike speed, motor power/torque, rider cadence/power/torque, altitude, elevation gain/loss, road slope, atmospheric pressure, assist mode, odometer
+
+- `ActivityDetails` -- Per-second telemetry: bike speed, motor power/torque,
+  rider cadence/power/torque, altitude, elevation gain/loss, road slope,
+  atmospheric pressure, assist mode, odometer
 - `ActivitySummary` -- Aggregate ride stats
 - `LocationActivityDetails` -- GPS: lat/lon/accuracy
 - `HealthActivityDetails` -- Heart rate
@@ -394,6 +445,7 @@ The `bes3/` package defines the Protocol Buffers schema for all bike data. This 
 - `TrickStats` -- Jump distance, air time, etc.
 
 **DashboardService:**
+
 - `BikeLightOn/Off`
 - `BatteryInfo` (SoC, remaining energy, serial number)
 - `BatteryStateOfChargeChange`
@@ -401,20 +453,27 @@ The `bes3/` package defines the Protocol Buffers schema for all bike data. This 
 - `BikeSystemConnected/Disconnected`
 
 **MessageBus wire format:**
-- `Uint8Message`, `Uint16Message`, `Uint32Message`, `Uint64Message` -- Numeric types with normalization factors
-- `AbsModeEnumType`, `WalkAssistStateEnumType`, `UpdateTypeEnumType` -- Enum types
-- `WalkAssistConfiguration`, `ViewStripeConfiguration`, `UnlockToken` -- Composite types
+
+- `Uint8Message`, `Uint16Message`, `Uint32Message`, `Uint64Message` -- Numeric
+  types with normalization factors
+- `AbsModeEnumType`, `WalkAssistStateEnumType`, `UpdateTypeEnumType` -- Enum
+  types
+- `WalkAssistConfiguration`, `ViewStripeConfiguration`, `UnlockToken` --
+  Composite types
 
 **Key files:**
+
 - `smali_classes3/com/bosch/ebike/bes3/ActivityService.smali`
 - `smali_classes3/com/bosch/ebike/bes3/DashboardService.smali`
 - `smali_classes4/com/bosch/ebike/messagebus/message/` -- Wire format messages
 
 ## Large Binary Transport
 
-FOTA firmware updates require transferring large binaries (several MB) over BLE. The `largebinarytransport/` package implements a chunked transfer protocol.
+FOTA firmware updates require transferring large binaries (several MB) over BLE.
+The `largebinarytransport/` package implements a chunked transfer protocol.
 
 **Key classes:**
+
 - `LargeBinaryTransportService` -- Orchestrates the transfer
 - `MessageChunker` -- Splits binary into chunks
 - `Server/` -- Transfer server on the bike side
@@ -444,25 +503,31 @@ The app requires these BLE-related permissions:
 ### Common Issues
 
 **Bike not detected:**
+
 - Check if bike is powered on and advertising
 - Verify BLE is enabled on the phone
 - Check location permissions (required for BLE scan on Android 11+)
-- Look for `BikeDetectedInBackgroundScan` or `BikeDetectedAsCompanionDevice` in logs
+- Look for `BikeDetectedInBackgroundScan` or `BikeDetectedAsCompanionDevice` in
+  logs
 
 **Connection drops:**
+
 - Check signal strength (RSSI)
 - Verify bike battery level
 - Check for interference (other BLE devices)
 - Look for `GattTimeoutError` or `GattException` in logs
 
 **Bonding issues:**
+
 - Ensure bike is in pairing mode
 - Check if phone has reached BLE bond limit (max 4 devices on most phones)
 - Look for `onBondingDeniedDisconnect` in logs
 
 **Background reconnection not working:**
+
 - Verify Companion Device association exists
-- Check if background scan is active (look for `BluetoothLeBackgroundScanner.startScan` in logs)
+- Check if background scan is active (look for
+  `BluetoothLeBackgroundScanner.startScan` in logs)
 - Ensure battery optimization is disabled for the app
 - Check `PocketModeStrategy` to see which strategy is active
 

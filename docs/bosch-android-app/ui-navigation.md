@@ -1,6 +1,8 @@
 # UI & Navigation
 
-The Bosch eBike Flow app uses a **single-activity architecture** with Jetpack Navigation Component. The UI is in an active migration from XML layouts to Jetpack Compose, resulting in a hybrid approach.
+The Bosch eBike Flow app uses a **single-activity architecture** with Jetpack
+Navigation Component. The UI is in an active migration from XML layouts to
+Jetpack Compose, resulting in a hybrid approach.
 
 ## Activity Architecture
 
@@ -8,12 +10,12 @@ The Bosch eBike Flow app uses a **single-activity architecture** with Jetpack Na
 
 The app has one `AppCompatActivity`:
 
-| Property | Value |
-|---|---|
-| Class | `com.bosch.ebike.onebikeapp.MainActivity` |
-| Layout | `res/layout/activity_main.xml` |
-| Orientation | Portrait (locked) |
-| Soft input | `adjustPan` |
+| Property    | Value                                     |
+| ----------- | ----------------------------------------- |
+| Class       | `com.bosch.ebike.onebikeapp.MainActivity` |
+| Layout      | `res/layout/activity_main.xml`            |
+| Orientation | Portrait (locked)                         |
+| Soft input  | `adjustPan`                               |
 
 **Layout:** A single `FragmentContainerView` hosting a `NavHostFragment`:
 
@@ -27,11 +29,14 @@ The app has one `AppCompatActivity`:
 
 ### Deep Link Receiver
 
-`DeepLinkReceiverActivity` handles all deep links and forwards them to `MainActivity`:
+`DeepLinkReceiverActivity` handles all deep links and forwards them to
+`MainActivity`:
 
-**Key file:** `smali_classes4/com/bosch/ebike/onebikeapp/DeepLinkReceiverActivity.smali`
+**Key file:**
+`smali_classes4/com/bosch/ebike/onebikeapp/DeepLinkReceiverActivity.smali`
 
 **Supported deep link schemes:**
+
 - `onebikeapp://` -- Internal app navigation
 - `onebike://` -- Legacy scheme
 - `flowApp://` -- Feature-specific navigation
@@ -45,42 +50,45 @@ The app has one `AppCompatActivity`:
 
 **File:** `res/navigation/global_nav_graph.xml`
 
-The root graph includes **80+ sub-navigation graphs**. Start destination is `splash_nav_graph`.
+The root graph includes **80+ sub-navigation graphs**. Start destination is
+`splash_nav_graph`.
 
 ### Key Navigation Graphs
 
-| Graph | Purpose |
-|---|---|
-| `splash_nav_graph` | Initial loading, routes to auth/home/pairing |
-| `auth_login_nav_graph` | Login flow |
-| `auth_signup_nav_graph` | Signup flow |
-| `auth_logout_nav_graph` | Logout flow |
-| `terms_and_conditions_nav_graph` | T&C, profile setup, analytics consent |
-| `main_nav_graph` | Main app shell (start: `NavBarFragment`) |
-| `nav_bar_nav_graph` | Bottom navigation tabs |
-| `bike_pairing_nav_graph` | Bike pairing flow |
-| `riding_nav_graph` | Riding screen |
-| `route_planning_nav_graph` | Route planning |
-| `subscription_nav_graph` | Flow+ subscription |
+| Graph                            | Purpose                                      |
+| -------------------------------- | -------------------------------------------- |
+| `splash_nav_graph`               | Initial loading, routes to auth/home/pairing |
+| `auth_login_nav_graph`           | Login flow                                   |
+| `auth_signup_nav_graph`          | Signup flow                                  |
+| `auth_logout_nav_graph`          | Logout flow                                  |
+| `terms_and_conditions_nav_graph` | T&C, profile setup, analytics consent        |
+| `main_nav_graph`                 | Main app shell (start: `NavBarFragment`)     |
+| `nav_bar_nav_graph`              | Bottom navigation tabs                       |
+| `bike_pairing_nav_graph`         | Bike pairing flow                            |
+| `riding_nav_graph`               | Riding screen                                |
+| `route_planning_nav_graph`       | Route planning                               |
+| `subscription_nav_graph`         | Flow+ subscription                           |
 
 ### Bottom Navigation (4 Tabs)
 
 **File:** `res/navigation/nav_bar_nav_graph.xml`
 
-| Tab | Fragment | Purpose |
-|---|---|---|
-| Home | `HomeFragment` | Main dashboard with cards |
-| Profile | `ProfileFragment` | User settings |
-| Planning | Routes to `route_planning_nav_graph` | Map-based route planning |
-| Activity | Routes to `activity_summaries_list_nav_graph` | Ride history |
+| Tab      | Fragment                                      | Purpose                   |
+| -------- | --------------------------------------------- | ------------------------- |
+| Home     | `HomeFragment`                                | Main dashboard with cards |
+| Profile  | `ProfileFragment`                             | User settings             |
+| Planning | Routes to `route_planning_nav_graph`          | Map-based route planning  |
+| Activity | Routes to `activity_summaries_list_nav_graph` | Ride history              |
 
 ### Navigation Helpers
 
 **Screen transitions:**
+
 - `smali_classes3/com/bosch/ebike/commonui/navigation/ScreenTransitionsKt.smali`
 - Pre-built `NavOptions` for horizontal/vertical slides with standard animations
 
 **WebView navigation:**
+
 - `smali_classes3/com/bosch/ebike/commonui/navigation/WebViewNavOptionsKt.smali`
 - Navigation options for WebView screens
 
@@ -93,6 +101,7 @@ The app is mid-migration from XML to Jetpack Compose.
 Older and more complex screens use XML layouts with ViewBinding:
 
 **Examples:**
+
 - `RoutePlanningFragment` -- Uses `FragmentRoutePlanningBinding`
 - `DealerMapFragment` -- Uses `FragmentDealerMapBinding`
 - `NavBarFragment` -- Uses `FragmentNavBarBinding`
@@ -101,7 +110,8 @@ Older and more complex screens use XML layouts with ViewBinding:
 
 Newer and simpler screens use Jetpack Compose via a base class:
 
-**Base class:** `smali_classes3/com/bosch/ebike/common/views/ComposeFragment.smali`
+**Base class:**
+`smali_classes3/com/bosch/ebike/common/views/ComposeFragment.smali`
 
 ```kotlin
 abstract class ComposeFragment : Fragment() {
@@ -121,6 +131,7 @@ abstract class ComposeFragment : Fragment() {
 ```
 
 **Examples of fully-Compose fragments:**
+
 - `IssuesFragment`
 - `IssueDetailsFragment`
 - `ThirdPartyFragment`
@@ -136,11 +147,13 @@ abstract class ComposeFragment : Fragment() {
 
 Some XML-based fragments embed `ComposeView` for specific sub-components:
 
-**Example:** `RoutePlanningFragment` has 10+ ComposeView overlays for dialogs, map overlays, and banners.
+**Example:** `RoutePlanningFragment` has 10+ ComposeView overlays for dialogs,
+map overlays, and banners.
 
 ### Bottom Navigation Bar
 
-The bottom navigation bar itself is a ComposeView embedded in the XML-based `NavBarFragment`:
+The bottom navigation bar itself is a ComposeView embedded in the XML-based
+`NavBarFragment`:
 
 ```kotlin
 // In NavBarFragment
@@ -162,6 +175,7 @@ The app has two generations of design system components.
 **Location:** `smali_classes3/com/bosch/ebike/designsystem/`
 
 Custom View components:
+
 - `FlowContextualBanner`
 - `FlowSpinner`
 - `FlowSpinnerButton`
@@ -177,7 +191,8 @@ The active design system, fully Compose-based.
 
 #### Theme
 
-**File:** `smali_classes3/com/bosch/ebike/designsystem/v2/theme/FlowThemeKt.smali`
+**File:**
+`smali_classes3/com/bosch/ebike/designsystem/v2/theme/FlowThemeKt.smali`
 
 `FlowTheme` wraps Material3's `MaterialTheme` via `CompositionLocalProvider`:
 
@@ -202,26 +217,31 @@ fun FlowTheme(
 #### Design Tokens
 
 **Colors:**
+
 - `FlowColors` interface with semantic tokens
 - `ColorsLight` and `ColorsDark` implementations
 - Tokens: `accentBgPrimary`, `neutralFgPrimary`, `errorFgOnPrimary`, etc.
 
 **Typography:**
+
 - `FlowTypography` -- Custom typography scale
 - Based on Material3 typography
 
 **Shapes:**
+
 - `FlowShapes` -- Custom shape definitions
 - `FlowShapeSize` -- Size variants
 - `ShapeSize` -- Enum: ExtraSmall, Small, Medium, Large, ExtraLarge
 
 **Spacing:**
+
 - `FlowSpacings` -- Spacing scale
 - `Spacings` -- Named spacing values
 - `FlowLayoutMargin` -- Layout margins
 - `FlowBorderWidth` -- Border widths
 
 **Other tokens:**
+
 - `FlowShadow` -- Shadow definitions
 - `FlowOpacity` -- Opacity values
 - `FlowTouchTarget` -- Touch target sizes
@@ -234,32 +254,33 @@ fun FlowTheme(
 
 18 component categories:
 
-| Category | Components |
-|---|---|
-| `badge/` | `FlowBadge`, `FlowConnectionBadge`, `FlowAssistModeBadge` |
-| `banner/` | `FlowContextualBanner` |
-| `button/` | `FlowPrimaryButton`, `FlowSecondaryButton`, `FlowGhostButton`, `FlowIconButton`, `FlowFloatingActionButton`, `FlowExtendedFloatingActionButton` |
-| `dialog/` | `FlowDialog` |
-| `input/` | `FlowTextField`, `FlowSelectionField` |
-| `link/` | `FlowLink` |
-| `listitem/` | `FlowListItem` |
-| `menu/` | `FlowMenu` |
-| `pageview/` | `FlowPagerIndicator` |
-| `progress/` | `FlowProgressBar` |
-| `selectioncontrol/` | `FlowCheckbox`, `FlowRadioButton`, `FlowSwitch` |
-| `sheet/` | `FlowModalBottomSheet` |
-| `slider/` | `FlowSlider` |
-| `snackbar/` | `FlowSnackbar` |
-| `tabs/` | `FlowTabs` |
-| `template/` | `AccessibleModalTemplate`, `ImageTitleContentActionsTemplate` |
-| `topappbar/` | `FlowTopAppBar` |
-| `utils/` | Utility composables |
+| Category            | Components                                                                                                                                      |
+| ------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| `badge/`            | `FlowBadge`, `FlowConnectionBadge`, `FlowAssistModeBadge`                                                                                       |
+| `banner/`           | `FlowContextualBanner`                                                                                                                          |
+| `button/`           | `FlowPrimaryButton`, `FlowSecondaryButton`, `FlowGhostButton`, `FlowIconButton`, `FlowFloatingActionButton`, `FlowExtendedFloatingActionButton` |
+| `dialog/`           | `FlowDialog`                                                                                                                                    |
+| `input/`            | `FlowTextField`, `FlowSelectionField`                                                                                                           |
+| `link/`             | `FlowLink`                                                                                                                                      |
+| `listitem/`         | `FlowListItem`                                                                                                                                  |
+| `menu/`             | `FlowMenu`                                                                                                                                      |
+| `pageview/`         | `FlowPagerIndicator`                                                                                                                            |
+| `progress/`         | `FlowProgressBar`                                                                                                                               |
+| `selectioncontrol/` | `FlowCheckbox`, `FlowRadioButton`, `FlowSwitch`                                                                                                 |
+| `sheet/`            | `FlowModalBottomSheet`                                                                                                                          |
+| `slider/`           | `FlowSlider`                                                                                                                                    |
+| `snackbar/`         | `FlowSnackbar`                                                                                                                                  |
+| `tabs/`             | `FlowTabs`                                                                                                                                      |
+| `template/`         | `AccessibleModalTemplate`, `ImageTitleContentActionsTemplate`                                                                                   |
+| `topappbar/`        | `FlowTopAppBar`                                                                                                                                 |
+| `utils/`            | Utility composables                                                                                                                             |
 
 #### Style Variants
 
 Each component has extensive style variants defined in `Style$*` hierarchy:
 
 **Example:** `Style$Button` has variants:
+
 - `Primary`
 - `Secondary`
 - `Ghost`
@@ -272,6 +293,7 @@ Each component has extensive style variants defined in `Style$*` hierarchy:
 ### Splash Screen
 
 Initial loading screen that routes to:
+
 - Auth flow (if not logged in)
 - Home screen (if logged in)
 - Bike pairing (if no bike registered)
@@ -279,6 +301,7 @@ Initial loading screen that routes to:
 ### Authentication Screens
 
 **Login flow:**
+
 1. Splash → Login screen
 2. User enters credentials
 3. App opens browser to Keycloak
@@ -288,6 +311,7 @@ Initial loading screen that routes to:
 7. Routes to home or onboarding
 
 **Signup flow:**
+
 1. Splash → Signup screen
 2. User enters email
 3. App opens browser to Keycloak registration
@@ -309,6 +333,7 @@ Initial loading screen that routes to:
 **File:** `smali_classes3/com/bosch/ebike/home/`
 
 Main dashboard with cards:
+
 - Battery info (SoC, range)
 - Maintenance reminders
 - Mileage stats
@@ -323,6 +348,7 @@ Main dashboard with cards:
 **File:** `smali_classes4/com/bosch/ebike/riding/`
 
 Live ride screen with:
+
 - Map view (Mapbox)
 - Speed, power, cadence metrics
 - Assist mode selector
@@ -337,6 +363,7 @@ Live ride screen with:
 **File:** `smali_classes4/com/bosch/ebike/route/`
 
 Map-based route planning with:
+
 - Mapbox map
 - Destination search
 - Favorite locations
@@ -349,6 +376,7 @@ Map-based route planning with:
 **File:** `smali_classes3/com/bosch/ebike/activitystatistics/`
 
 Ride history with:
+
 - List of past rides
 - Ride details (map, metrics, elevation)
 - Statistics (distance, time, elevation gain)
@@ -359,6 +387,7 @@ Ride history with:
 **File:** `smali_classes3/com/bosch/ebike/bikesettings/`
 
 Bike configuration:
+
 - Assistance modes (customize levels)
 - Ride settings (light, walk assist)
 - Bike info (name, components)
@@ -370,6 +399,7 @@ Bike configuration:
 **File:** `smali_classes2/com/bosch/ebike/antitheft/`
 
 Security features:
+
 - Bike lock/unlock
 - Theft detection onboarding
 - Crash detection settings
@@ -382,6 +412,7 @@ Security features:
 **File:** `smali_classes3/com/bosch/ebike/fota/`
 
 Firmware updates:
+
 - Check for updates
 - Download firmware
 - Transfer to bike
@@ -393,6 +424,7 @@ Firmware updates:
 **File:** `smali_classes4/com/bosch/ebike/subscription/`
 
 Flow+ subscription:
+
 - Feature details
 - Plan selection (monthly/yearly)
 - Pricing
@@ -404,10 +436,12 @@ Flow+ subscription:
 The app supports per-OEM theme customization.
 
 **Key files:**
+
 - `smali_classes4/com/bosch/ebike/oem/` -- OEM theme services
 - `res/navigation/oem_theme_preview` -- Theme preview graph
 
 OEMs can customize:
+
 - Colors
 - Logos
 - App name
@@ -419,10 +453,12 @@ OEMs can customize:
 The app includes accessibility features:
 
 **Key files:**
+
 - `smali_classes3/com/bosch/ebike/commonui/compose/AccessibleModalTemplate.smali`
 - Accessibility helpers in `commonui/`
 
 Features:
+
 - Content descriptions for all interactive elements
 - Touch target sizes meet WCAG guidelines
 - Screen reader support
@@ -431,6 +467,7 @@ Features:
 ## Animations
 
 Standard animations defined in `res/anim/`:
+
 - `anim_flow_slide_in_right`
 - `anim_flow_slide_out_left`
 - `anim_flow_slide_in_left`

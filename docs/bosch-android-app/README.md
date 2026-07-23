@@ -1,12 +1,16 @@
 # Bosch eBike Flow Android App -- Developer Onboarding
 
-This directory contains developer documentation for the Bosch eBike Flow Android app (v1.34.6), reconstructed from the decompiled APK. The original source code was not available, so this documentation was created by analyzing the decompiled smali bytecode, resources, and assets.
+This directory contains developer documentation for the Bosch eBike Flow Android
+app (v1.34.6), reconstructed from the decompiled APK. The original source code
+was not available, so this documentation was created by analyzing the decompiled
+smali bytecode, resources, and assets.
 
 ## Quick Start
 
 ### What is this app?
 
-The Bosch eBike Flow app is the companion app for Bosch eBike systems. It connects to eBikes via Bluetooth Low Energy (BLE) and provides:
+The Bosch eBike Flow app is the companion app for Bosch eBike systems. It
+connects to eBikes via Bluetooth Low Energy (BLE) and provides:
 
 - Real-time ride dashboard with telemetry (speed, power, cadence, battery)
 - Bike configuration (assistance modes, display settings, light control)
@@ -19,16 +23,16 @@ The Bosch eBike Flow app is the companion app for Bosch eBike systems. It connec
 
 ### App Identity
 
-| Property | Value |
-|---|---|
-| Package name | `com.bosch.ebike.onebikeapp` |
-| App label | `@string/general_appName` (Bosch eBike Flow) |
-| Min SDK | 26 (Android 8.0) |
-| Target SDK | 36 (Android 16) |
-| Version | 1.34.6 (build 1125) |
-| Theme | `@style/Theme.Flow` |
-| Application class | `com.bosch.ebike.onebikeapp.App` |
-| Main activity | `com.bosch.ebike.onebikeapp.MainActivity` (single-activity) |
+| Property          | Value                                                       |
+| ----------------- | ----------------------------------------------------------- |
+| Package name      | `com.bosch.ebike.onebikeapp`                                |
+| App label         | `@string/general_appName` (Bosch eBike Flow)                |
+| Min SDK           | 26 (Android 8.0)                                            |
+| Target SDK        | 36 (Android 16)                                             |
+| Version           | 1.34.6 (build 1125)                                         |
+| Theme             | `@style/Theme.Flow`                                         |
+| Application class | `com.bosch.ebike.onebikeapp.App`                            |
+| Main activity     | `com.bosch.ebike.onebikeapp.MainActivity` (single-activity) |
 
 ### Repository Layout
 
@@ -60,11 +64,13 @@ Smali is a human-readable representation of Android DEX bytecode. Key patterns:
 - **Class files**: `ClassName.smali` -- each Java/Kotlin class is one file
 - **Inner classes**: `OuterClass$InnerClass.smali`
 - **Lambda/synthetic**: `ClassName$$ExternalSyntheticLambda0.smali`
-- **Kotlin file facades**: `FileNameKt.smali` (top-level functions from a Kotlin file)
+- **Kotlin file facades**: `FileNameKt.smali` (top-level functions from a Kotlin
+  file)
 - **Companion objects**: `ClassName$Companion.smali`
 - **Sealed/enum variants**: `SealedClass$VariantName.smali`
 
 Common smali instructions:
+
 - `invoke-virtual`, `invoke-interface`, `invoke-static` -- method calls
 - `iget-object`, `sget-object` -- field access
 - `new-instance`, `const-string`, `const/4` -- object/string creation
@@ -85,37 +91,38 @@ We recommend reading the docs in this order:
 
 ## Key Technologies
 
-| Layer | Technology |
-|---|---|
-| Language | Kotlin (compiled to JVM bytecode) |
-| UI | Hybrid: XML Layouts + Jetpack Compose (mid-migration) |
-| Navigation | Jetpack Navigation Component (Fragment-based, 80+ nav graphs) |
-| DI | Koin |
-| Networking (new) | Ktor + Ktorfit |
-| Networking (legacy) | OkHttp + Retrofit |
-| Serialization | kotlinx.serialization, Gson, Protobuf |
-| Auth | AppAuth (OAuth2/OIDC against Bosch Keycloak) |
-| Database | Room (4 separate databases) |
-| BLE | Android BluetoothLeScanner + custom GATT wrapper |
-| Maps | Mapbox SDK (maps + navigation) |
-| Image loading | Coil |
-| Analytics | Firebase Analytics, Adjust |
-| Crash reporting | Firebase Crashlytics |
-| Push notifications | Firebase Cloud Messaging |
-| Billing | Google Play Billing Library 8.0.0 |
+| Layer               | Technology                                                    |
+| ------------------- | ------------------------------------------------------------- |
+| Language            | Kotlin (compiled to JVM bytecode)                             |
+| UI                  | Hybrid: XML Layouts + Jetpack Compose (mid-migration)         |
+| Navigation          | Jetpack Navigation Component (Fragment-based, 80+ nav graphs) |
+| DI                  | Koin                                                          |
+| Networking (new)    | Ktor + Ktorfit                                                |
+| Networking (legacy) | OkHttp + Retrofit                                             |
+| Serialization       | kotlinx.serialization, Gson, Protobuf                         |
+| Auth                | AppAuth (OAuth2/OIDC against Bosch Keycloak)                  |
+| Database            | Room (4 separate databases)                                   |
+| BLE                 | Android BluetoothLeScanner + custom GATT wrapper              |
+| Maps                | Mapbox SDK (maps + navigation)                                |
+| Image loading       | Coil                                                          |
+| Analytics           | Firebase Analytics, Adjust                                    |
+| Crash reporting     | Firebase Crashlytics                                          |
+| Push notifications  | Firebase Cloud Messaging                                      |
+| Billing             | Google Play Billing Library 8.0.0                             |
 
 ## Environment Configuration
 
 The app supports 4 backend environments, selected by the APK's release category:
 
-| Release Category | Environment | Auth Server |
-|---|---|---|
-| 1 | STAGE | `p8.authz.bosch.com` |
-| 2 | QA | `p10.authz.bosch.com` |
-| 3 | QA | `p10.authz.bosch.com` |
-| 4 | PRODUCTION | `p9.authz.bosch.com` |
-| (dev) | DEV | `p4.authz.bosch.com` |
+| Release Category | Environment | Auth Server           |
+| ---------------- | ----------- | --------------------- |
+| 1                | STAGE       | `p8.authz.bosch.com`  |
+| 2                | QA          | `p10.authz.bosch.com` |
+| 3                | QA          | `p10.authz.bosch.com` |
+| 4                | PRODUCTION  | `p9.authz.bosch.com`  |
+| (dev)            | DEV         | `p4.authz.bosch.com`  |
 
-All API base URLs follow the pattern: `https://{service}.{env}.connected-biking.cloud/`
+All API base URLs follow the pattern:
+`https://{service}.{env}.connected-biking.cloud/`
 
 See [Backend & API](backend-api.md) for the full list of 23+ service URLs.

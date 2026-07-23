@@ -2,7 +2,9 @@
 
 ## High-Level System Design
 
-The Bosch eBike Flow app follows a **modular monolith** architecture with clear domain boundaries. The app is structured around ~100 feature modules, each following a consistent `datasources -> services -> views` layering pattern.
+The Bosch eBike Flow app follows a **modular monolith** architecture with clear
+domain boundaries. The app is structured around ~100 feature modules, each
+following a consistent `datasources -> services -> views` layering pattern.
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
@@ -40,6 +42,7 @@ com.bosch.ebike.<module>/
 ```
 
 This separation ensures:
+
 - **Testability**: Services can be tested without UI or data layer
 - **Reusability**: Data sources can be shared across features
 - **Clarity**: Clear boundaries between concerns
@@ -48,7 +51,8 @@ This separation ensures:
 
 ### 1. BLE Communication Stack
 
-The app communicates with the eBike via Bluetooth Low Energy. The stack has 4 layers:
+The app communicates with the eBike via Bluetooth Low Energy. The stack has 4
+layers:
 
 ```
 ┌─────────────────────────────────────────┐
@@ -73,6 +77,7 @@ The app communicates with the eBike via Bluetooth Low Energy. The stack has 4 la
 ```
 
 **Key packages:**
+
 - `ble/` -- Low-level GATT wrapper
 - `bluetoothcommunication/` -- Connection management, GATT config
 - `communicationstack/` -- Binary protocol, message bus gateway
@@ -83,16 +88,20 @@ See [BLE Communication](ble-communication.md) for details.
 
 ### 2. Backend API Layer
 
-The app uses a **dual HTTP client architecture** during a migration from OkHttp+Retrofit to Ktor+Ktorfit:
+The app uses a **dual HTTP client architecture** during a migration from
+OkHttp+Retrofit to Ktor+Ktorfit:
 
 - **New services** (bike profile, ownership, access management): Ktor + Ktorfit
 - **Legacy services** (activity, bike lock, theft detection): OkHttp + Retrofit
 
-All APIs are hosted on `*.connected-biking.cloud` with environment-specific subdomains.
+All APIs are hosted on `*.connected-biking.cloud` with environment-specific
+subdomains.
 
-**Authentication:** OAuth2 Authorization Code flow via AppAuth library against Bosch Keycloak instances.
+**Authentication:** OAuth2 Authorization Code flow via AppAuth library against
+Bosch Keycloak instances.
 
 **Key packages:**
+
 - `httprest/` -- HTTP clients, interceptors, authenticators
 - `authentication/` -- OAuth2 flow, token management
 - `backend/` -- Protobuf models for telemetry ingestion
@@ -103,20 +112,23 @@ See [Backend & API](backend-api.md) for details.
 
 The app uses **4 separate Room databases** plus DataStore/SharedPreferences:
 
-| Database | Purpose | Version |
-|---|---|---|
-| `RoomBikesDatabase` | Bike registration, components, cloud sync queue | 100+ |
-| `TheftDetectionDatabase` | GPS coordinates for theft tracking | 1 |
-| `ActivityDatabase` | Ride samples, assist mode usage | 10 |
-| `UpdateSetsDatabase` | FOTA firmware update metadata | 1 |
+| Database                 | Purpose                                         | Version |
+| ------------------------ | ----------------------------------------------- | ------- |
+| `RoomBikesDatabase`      | Bike registration, components, cloud sync queue | 100+    |
+| `TheftDetectionDatabase` | GPS coordinates for theft tracking              | 1       |
+| `ActivityDatabase`       | Ride samples, assist mode usage                 | 10      |
+| `UpdateSetsDatabase`     | FOTA firmware update metadata                   | 1       |
 
-**Repository pattern:** `CachedApiRepository<K, E>` implements cache-then-network: emit cached data first, then fetch from network, handle 404s by clearing cache.
+**Repository pattern:** `CachedApiRepository<K, E>` implements
+cache-then-network: emit cached data first, then fetch from network, handle 404s
+by clearing cache.
 
 See [Data Layer](data-layer.md) for details.
 
 ### 4. Dependency Injection (Koin)
 
-The app uses **Koin** for dependency injection. Modules are composed hierarchically:
+The app uses **Koin** for dependency injection. Modules are composed
+hierarchically:
 
 ```
 appModules (root)
@@ -135,9 +147,11 @@ appModules (root)
        ├─ ... (20+ more)
 ```
 
-Each domain module set aggregates the datasources/services/views modules for that feature.
+Each domain module set aggregates the datasources/services/views modules for
+that feature.
 
 **Key files:**
+
 - `onebikeapp/ModulesKt.smali` -- Root module definitions
 - `onebikeapp/ModuleCompositionKt.smali` -- Domain module composition
 
@@ -153,7 +167,8 @@ The app is a **single-activity architecture** with Jetpack Navigation Component:
   - Newer screens: Jetpack Compose via `ComposeFragment` base class
   - Design system v2 is fully Compose
 
-**Deep links:** Custom URI schemes `onebikeapp://` and `flowApp://` for navigation.
+**Deep links:** Custom URI schemes `onebikeapp://` and `flowApp://` for
+navigation.
 
 See [UI & Navigation](ui-navigation.md) for details.
 
@@ -161,7 +176,6 @@ See [UI & Navigation](ui-navigation.md) for details.
 
 ### Example 1: Reading Bike Battery Level
 
-```
 1. User opens Home screen
 2. HomeViewModel observes MessageBus.Battery.stateOfCharge (DataPoint)
 3. MessageBus routes read request to Broker
@@ -173,11 +187,9 @@ See [UI & Navigation](ui-navigation.md) for details.
 9. Broker routes response back to MessageBus
 10. MessageBus.Battery.stateOfCharge emits new value
 11. HomeViewModel updates UI
-```
 
 ### Example 2: Syncing Bike Profile to Cloud
 
-```
 1. User changes assistance mode setting
 2. BikeSettingsViewModel writes new value to MessageBus.DriveUnit.assistMode
 3. MessageBus sends WriteMessage to bike via BLE
@@ -187,11 +199,9 @@ See [UI & Navigation](ui-navigation.md) for details.
 7. Maps BES3 protobuf data to CloudSync DTOs (kotlinx.serialization)
 8. Sends POST request to Rider Profile API (Ktor/Retrofit)
 9. Backend acknowledges, CloudSyncRequest is deleted from Room
-```
 
 ### Example 3: FOTA Firmware Update
 
-```
 1. FotaCheckAvailability queries backend for available updates
 2. Backend returns UpdateSet metadata (compatible components, versions)
 3. User initiates update from FOTA settings screen
@@ -203,13 +213,13 @@ See [UI & Navigation](ui-navigation.md) for details.
 7. Component reboots with new firmware
 8. FotaReportService generates installation report
 9. CloudSync uploads report to backend
-```
 
 ## Key Design Patterns
 
 ### 1. Reactive Streams (Kotlin Flow)
 
 The app is heavily reactive. Most data sources expose `Flow<T>`:
+
 - Room DAOs return `Flow<List<Entity>>`
 - MessageBus DataPoints expose `Flow<Value>` for subscriptions
 - Network responses are wrapped in `Flow<Resource<T>>`
@@ -218,6 +228,7 @@ The app is heavily reactive. Most data sources expose `Flow<T>`:
 ### 2. Coroutine-First
 
 All I/O operations are suspend functions. The app uses:
+
 - `viewModelScope` for ViewModel coroutines
 - `lifecycleScope` for Fragment/Activity coroutines
 - Custom `CoroutineScope` for services (e.g., pocket mode)
@@ -226,6 +237,7 @@ All I/O operations are suspend functions. The app uses:
 ### 3. Sealed Classes for State
 
 State is modeled with sealed classes/enums:
+
 - `LoginStatus` (LoggedIn, LoggedOut, InvalidToken)
 - `SubscriptionStatus` (Active, NotActive)
 - `ConnectionState` (Connecting, Connected, Disconnecting, Disconnected)
@@ -234,13 +246,16 @@ State is modeled with sealed classes/enums:
 ### 4. Error Handling
 
 Errors are typed and handled explicitly:
+
 - Network errors: `retrofit2.HttpException` with status codes
 - BLE errors: `BluetoothFailureReason` sealed class
-- Business errors: Domain-specific sealed classes (e.g., `PurchaseSubscription.Error`)
+- Business errors: Domain-specific sealed classes (e.g.,
+  `PurchaseSubscription.Error`)
 
 ### 5. Feature Flags
 
 The app uses remote configuration for feature flags:
+
 - `FeatureFlags` module reads from backend
 - `ConfigurationContainerService` provides runtime config
 - A/B testing via `abtesting/` module (Adjust SDK)
@@ -302,7 +317,9 @@ The app uses remote configuration for feature flags:
 ## Testing Strategy
 
 The decompiled code shows evidence of:
-- **Unit tests**: Test files in `androidTest/` and `test/` directories (not included in APK)
+
+- **Unit tests**: Test files in `androidTest/` and `test/` directories (not
+  included in APK)
 - **Integration tests**: `messagebusmock/` module for testing without real BLE
 - **UI tests**: Compose test utilities in `commonui/`
 - **Factory tests**: `testerinterface/` module for production line testing
@@ -312,13 +329,17 @@ The decompiled code shows evidence of:
 ### Build System
 
 The app uses **Android App Bundles** (AAB) with split APKs:
+
 - `base.apk` -- Core app code and resources
-- `split_config.<abi>.apk` -- Architecture-specific native libs (armeabi_v7a, arm64_v8a, x86, x86_64)
-- `split_config.<dpi>.apk` -- Density-specific resources (mdpi, hdpi, xhdpi, xxhdpi, xxxhdpi, tvdpi, ldpi)
+- `split_config.<abi>.apk` -- Architecture-specific native libs (armeabi_v7a,
+  arm64_v8a, x86, x86_64)
+- `split_config.<dpi>.apk` -- Density-specific resources (mdpi, hdpi, xhdpi,
+  xxhdpi, xxxhdpi, tvdpi, ldpi)
 
 ### Release Channels
 
 The APK's `ReleaseCategory` determines the backend environment:
+
 - Category 1 → STAGE
 - Category 2 → QA
 - Category 3 → QA
