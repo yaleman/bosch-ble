@@ -6,7 +6,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from subprocess import CompletedProcess
 from types import SimpleNamespace
-from unittest.mock import ANY, AsyncMock, patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
@@ -40,18 +40,20 @@ def test_dump_gatt_cli_shows_usage_without_address(capsys: pytest.CaptureFixture
             dump_gatt.cli()
 
     assert excinfo.value.code == 2
-    assert "Usage: bosch-ble-dump-gatt <BLE_ADDRESS>" in capsys.readouterr().out
+    assert "the following arguments are required: address" in capsys.readouterr().err
 
 
 def test_dump_gatt_cli_runs_async_main_with_address() -> None:
-    async def fake_main(address: str) -> None:
+    async def fake_main(address: str, *, backend: str = "bluez", esphome_host: str | None = None) -> None:
         assert address == "AA:BB:CC:DD:EE:FF"
+        assert backend == "bluez"
+        assert esphome_host is None
 
     with patch.object(dump_gatt, "main", side_effect=fake_main) as patched_main:
         with patch("sys.argv", ["bosch-ble-dump-gatt", "AA:BB:CC:DD:EE:FF"]):
             dump_gatt.cli()
 
-    patched_main.assert_called_once_with("AA:BB:CC:DD:EE:FF")
+    patched_main.assert_called_once_with("AA:BB:CC:DD:EE:FF", backend="bluez", esphome_host=None)
 
 
 def test_probe_cli_shows_usage_without_address(capsys: pytest.CaptureFixture[str]) -> None:
@@ -60,11 +62,11 @@ def test_probe_cli_shows_usage_without_address(capsys: pytest.CaptureFixture[str
             probe.cli()
 
     assert excinfo.value.code == 2
-    assert "Usage: bosch-ble-probe <BLE_ADDRESS> [output_file]" in capsys.readouterr().out
+    assert "the following arguments are required: address" in capsys.readouterr().err
 
 
 def test_dump_gatt_cli_prints_friendly_error(capsys: pytest.CaptureFixture[str]) -> None:
-    async def fake_main(address: str) -> None:
+    async def fake_main(address: str, *, backend: str = "bluez", esphome_host: str | None = None) -> None:
         raise RuntimeError(f"Device with address {address} was not found.")
 
     with patch.object(dump_gatt, "main", side_effect=fake_main):
@@ -81,7 +83,7 @@ def test_dump_gatt_cli_prints_friendly_error(capsys: pytest.CaptureFixture[str])
 def test_dump_gatt_cli_falls_back_to_exception_type_when_message_is_empty(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    async def fake_main(address: str) -> None:
+    async def fake_main(address: str, *, backend: str = "bluez", esphome_host: str | None = None) -> None:
         raise RuntimeError()
 
     with patch.object(dump_gatt, "main", side_effect=fake_main):
@@ -1416,7 +1418,7 @@ def test_dump_gatt_main_runs_preflight_and_connect_only_before_bleak_client(
                     await dump_gatt.main("AA:BB:CC:DD:EE:FF")
 
     asyncio.run(run())
-    assert "Connecting to AA:BB:CC:DD:EE:FF ..." in capsys.readouterr().out
+    assert "Connecting to AA:BB:CC:DD:EE:FF via bluez ..." in capsys.readouterr().out
     assert call_order == [
         ("preflight", "AA:BB:CC:DD:EE:FF"),
         ("connect_device", "AA:BB:CC:DD:EE:FF"),
@@ -1484,7 +1486,7 @@ def test_dump_gatt_main_can_connect_by_address_when_scan_cannot_find_device(
     asyncio.run(run())
     assert targets == ["AA:BB:CC:DD:EE:FF"]
     output = capsys.readouterr().out
-    assert "Connecting to AA:BB:CC:DD:EE:FF ..." in output
+    assert "Connecting to AA:BB:CC:DD:EE:FF via bluez ..." in output
 
 
 def test_dump_gatt_main_uses_bluez_device_path_when_connected_but_not_visible(
@@ -1542,7 +1544,7 @@ def test_dump_gatt_main_uses_bluez_device_path_when_connected_but_not_visible(
     assert getattr(targets[0], "address", None) == "AA:BB:CC:DD:EE:FF"
     assert getattr(targets[0], "details", {}).get("path") == "/org/bluez/hci0/dev_AA_BB_CC_DD_EE_FF"
     output = capsys.readouterr().out
-    assert "Connecting to AA:BB:CC:DD:EE:FF ..." in output
+    assert "Connecting to AA:BB:CC:DD:EE:FF via bluez ..." in output
 
 
 def test_dump_gatt_main_skips_wait_when_service_resolution_is_unavailable(
@@ -1614,7 +1616,7 @@ def test_dump_gatt_main_skips_wait_when_service_resolution_is_unavailable(
 
     asyncio.run(run())
     assert targets == [fake_device]
-    assert "Connecting to AA:BB:CC:DD:EE:FF ..." in capsys.readouterr().out
+    assert "Connecting to AA:BB:CC:DD:EE:FF via bluez ..." in capsys.readouterr().out
 
 
 def test_dump_gatt_main_retries_when_service_discovery_disconnects(
@@ -1659,7 +1661,7 @@ def test_dump_gatt_main_retries_when_service_discovery_disconnects(
 
     asyncio.run(run())
     output = capsys.readouterr().out
-    assert "Connecting to AA:BB:CC:DD:EE:FF ..." in output
+    assert "Connecting to AA:BB:CC:DD:EE:FF via bluez ..." in output
 
 
 def test_prepare_connection_accepts_connected_state_when_services_do_not_resolve() -> None:
@@ -2006,7 +2008,7 @@ def test_log_chars_main_uses_dump_gatt_client_target_for_state(
     asyncio.run(run())
     assert targets == [target]
     output = capsys.readouterr().out
-    assert "Connecting to AA:BB:CC:DD:EE:FF ..." in output
+    assert "Connecting to AA:BB:CC:DD:EE:FF via bluez ..." in output
     assert "Connected: True" in output
     assert "Subscribing to notifiable characteristics..." in output
 
@@ -2107,7 +2109,7 @@ def test_probe_main_uses_dump_gatt_target_and_logs_probe_results(
     assert targets == [target]
     assert writes == [("00000012-eaa2-11e9-81b4-2a2ae2dbcce4", b"\x01", False)]
     output = capsys.readouterr().out
-    assert "Connecting to AA:BB:CC:DD:EE:FF ..." in output
+    assert "Connecting to AA:BB:CC:DD:EE:FF via bluez ..." in output
     assert "PROBE uuid=00000012-eaa2-11e9-81b4-2a2ae2dbcce4 payload=01" in output
     assert "NOTIFY sender=notify-sender hex=1002" in output
     assert "READ_CHANGE uuid=00000041-eaa2-11e9-81b4-2a2ae2dbcce4 before=1800 after=1900" in output
@@ -2232,26 +2234,38 @@ def test_log_chars_cli_shows_usage_without_address(capsys: pytest.CaptureFixture
             log_chars.cli()
 
     assert excinfo.value.code == 2
-    assert "Usage: bosch-ble-log-chars <BLE_ADDRESS> [output_file]" in capsys.readouterr().out
+    assert "the following arguments are required: address" in capsys.readouterr().err
 
 
 def test_log_chars_cli_runs_async_main_with_default_output() -> None:
-    captured: list[tuple[str, str]] = []
+    captured: list[tuple[str, str | None]] = []
 
-    async def fake_main(address: str, out_file: str) -> None:
+    async def fake_main(
+        address: str,
+        out_file: str | None,
+        *,
+        backend: str = "bluez",
+        esphome_host: str | None = None,
+    ) -> None:
         captured.append((address, out_file))
 
     with patch.object(log_chars, "main", side_effect=fake_main) as patched_main:
         with patch("sys.argv", ["bosch-ble-log-chars", "AA:BB:CC:DD:EE:FF"]):
             log_chars.cli()
 
-    patched_main.assert_called_once_with("AA:BB:CC:DD:EE:FF", ANY)
+    patched_main.assert_called_once_with("AA:BB:CC:DD:EE:FF", None, backend="bluez", esphome_host=None)
     assert captured[0][0] == "AA:BB:CC:DD:EE:FF"
-    assert captured[0][1].startswith("ble_log-")
+    assert captured[0][1] is None
 
 
 def test_log_chars_cli_runs_async_main_with_explicit_output() -> None:
-    async def fake_main(address: str, out_file: str) -> None:
+    async def fake_main(
+        address: str,
+        out_file: str,
+        *,
+        backend: str = "bluez",
+        esphome_host: str | None = None,
+    ) -> None:
         assert address == "AA:BB:CC:DD:EE:FF"
         assert out_file == "out.txt"
 
@@ -2259,7 +2273,7 @@ def test_log_chars_cli_runs_async_main_with_explicit_output() -> None:
         with patch("sys.argv", ["bosch-ble-log-chars", "AA:BB:CC:DD:EE:FF", "out.txt"]):
             log_chars.cli()
 
-    patched_main.assert_called_once_with("AA:BB:CC:DD:EE:FF", "out.txt")
+    patched_main.assert_called_once_with("AA:BB:CC:DD:EE:FF", "out.txt", backend="bluez", esphome_host=None)
 
 
 def test_log_chars_main_resets_stop_event_between_runs(
@@ -2389,7 +2403,7 @@ def test_log_chars_main_prepares_connection_before_bleak_client(
                 ):
                     await log_chars.main("AA:BB:CC:DD:EE:FF", str(tmp_path / "ble_log.txt"))
 
-        prepare_connection.assert_awaited_once_with("AA:BB:CC:DD:EE:FF")
+        prepare_connection.assert_awaited_once_with("AA:BB:CC:DD:EE:FF", backend="bluez")
 
     asyncio.run(run())
     assert targets == [fake_device]

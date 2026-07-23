@@ -104,9 +104,15 @@ def build_startup_response_packets(
     ]
 
 
-async def main(address: str, out_file: str | None = None) -> None:
+async def main(
+    address: str,
+    out_file: str | None = None,
+    *,
+    backend: live.Backend = "bluez",
+    esphome_host: str | None = None,
+) -> None:
     path = Path(out_file or f"ble_handshake-{ts()}.txt")
-    print(f"Connecting to {address} ...", flush=True)
+    print(f"Connecting to {address} via {backend} ...", flush=True)
     print(f"Logging to {path}", flush=True)
 
     loop = asyncio.get_running_loop()
@@ -117,7 +123,9 @@ async def main(address: str, out_file: str | None = None) -> None:
         except NotImplementedError:
             pass
 
-    async with live.connected_client(address, timeout=20.0) as client:
+    async with live.connected_client(
+        address, timeout=20.0, backend=backend, esphome_host=esphome_host
+    ) as client:
         print(f"Connected: {client.is_connected}", flush=True)
         receive_uuid, send_uuid = find_mcsp_transport(client.services)
         with path.open("a", encoding="utf-8") as fh:
@@ -162,14 +170,39 @@ async def main(address: str, out_file: str | None = None) -> None:
 
 
 def cli() -> None:
-    if len(sys.argv) not in {2, 3}:
-        print(f"Usage: {sys.argv[0]} <BLE_ADDRESS> [output_file]")
-        raise SystemExit(2)
+    import argparse
 
-    address = validate_address(sys.argv[1])
-    output = sys.argv[2] if len(sys.argv) == 3 else f"ble_handshake-{ts()}.txt"
+    parser = argparse.ArgumentParser(
+        description="Trace MCSP startup handshake with a Bosch eBike"
+    )
+    parser.add_argument("address", help="BLE address of the bike (XX:XX:XX:XX:XX:XX)")
+    parser.add_argument("output_file", nargs="?", help="Output file path")
+    parser.add_argument(
+        "--backend",
+        choices=["bluez", "esphome"],
+        default="bluez",
+        help="Connection backend (default: bluez)",
+    )
+    parser.add_argument(
+        "--esphome-host",
+        help="ESPHome proxy host address (required for esphome backend)",
+    )
+
+    args = parser.parse_args()
+    address = validate_address(args.address)
+
+    if args.backend == "esphome" and not args.esphome_host:
+        parser.error("--esphome-host is required when using --backend esphome")
+
     try:
-        asyncio.run(main(address, output))
+        asyncio.run(
+            main(
+                address,
+                args.output_file,
+                backend=args.backend,
+                esphome_host=args.esphome_host,
+            )
+        )
     except KeyboardInterrupt:
         raise SystemExit(130)
     except Exception as exc:

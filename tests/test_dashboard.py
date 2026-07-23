@@ -74,22 +74,24 @@ def test_dashboard_cli_shows_usage_without_address(capsys: pytest.CaptureFixture
             dashboard.cli()
 
     assert excinfo.value.code == 2
-    assert "Usage: bosch-ble-dashboard <BLE_ADDRESS>" in capsys.readouterr().out
+    assert "the following arguments are required: address" in capsys.readouterr().err
 
 
 def test_dashboard_cli_runs_async_main_with_address() -> None:
-    async def fake_main(address: str) -> None:
+    async def fake_main(address: str, *, backend: str = "bluez", esphome_host: str | None = None) -> None:
         assert address == "AA:BB:CC:DD:EE:FF"
+        assert backend == "bluez"
+        assert esphome_host is None
 
     with patch.object(dashboard, "main", side_effect=fake_main) as patched_main:
         with patch("sys.argv", ["bosch-ble-dashboard", "AA:BB:CC:DD:EE:FF"]):
             dashboard.cli()
 
-    patched_main.assert_called_once_with("AA:BB:CC:DD:EE:FF")
+    patched_main.assert_called_once_with("AA:BB:CC:DD:EE:FF", backend="bluez", esphome_host=None)
 
 
 def test_dashboard_cli_prints_friendly_error(capsys: pytest.CaptureFixture[str]) -> None:
-    async def fake_main(address: str) -> None:
+    async def fake_main(address: str, *, backend: str = "bluez", esphome_host: str | None = None) -> None:
         raise RuntimeError(f"bad dashboard for {address}")
 
     with patch.object(dashboard, "main", side_effect=fake_main):

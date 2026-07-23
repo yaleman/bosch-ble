@@ -372,7 +372,8 @@ def test_cli_clears_terminal_after_app_exit() -> None:
         with patch(
             "bosch_ble.scan.clear_terminal", side_effect=lambda: events.append("clear")
         ):
-            cli()
+            with patch("sys.argv", ["bosch-ble-scan"]):
+                cli()
 
     assert events == ["run", "clear"]
 
@@ -393,7 +394,8 @@ def test_cli_runs_dump_gatt_as_subprocess_for_selected_address() -> None:
                 "bosch_ble.scan.subprocess.run",
                 side_effect=lambda *args, **kwargs: events.append(("subprocess", args, kwargs)),
             ):
-                cli()
+                with patch("sys.argv", ["bosch-ble-scan"]):
+                    cli()
 
     assert events == [
         "run",

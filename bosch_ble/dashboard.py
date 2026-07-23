@@ -199,8 +199,13 @@ def _print_dashboard(state: DashboardState) -> None:
     print(f"{CLEAR_SCREEN}{render_dashboard(state)}", end="\n", flush=True)
 
 
-async def main(address: str) -> None:
-    print(f"Connecting to {address} ...", flush=True)
+async def main(
+    address: str,
+    *,
+    backend: live.Backend = "bluez",
+    esphome_host: str | None = None,
+) -> None:
+    print(f"Connecting to {address} via {backend} ...", flush=True)
     loop = asyncio.get_running_loop()
     stop = asyncio.Event()
     for sig in (signal.SIGINT, signal.SIGTERM):
@@ -212,7 +217,9 @@ async def main(address: str) -> None:
     state = DashboardState(connection_status="connecting")
     _print_dashboard(state)
 
-    async with live.connected_client(address, timeout=20.0) as client:
+    async with live.connected_client(
+        address, timeout=20.0, backend=backend, esphome_host=esphome_host
+    ) as client:
         state.connection_status = "connected" if client.is_connected else "disconnected"
         _print_dashboard(state)
         receive_uuid, send_uuid = handshake.find_mcsp_transport(client.services)
@@ -246,13 +253,33 @@ async def main(address: str) -> None:
 
 
 def cli() -> None:
-    if len(sys.argv) != 2:
-        print(f"Usage: {sys.argv[0]} <BLE_ADDRESS>")
-        raise SystemExit(2)
+    import argparse
 
-    address = validate_address(sys.argv[1])
+    parser = argparse.ArgumentParser(
+        description="Live dashboard for Bosch eBike BLE data"
+    )
+    parser.add_argument("address", help="BLE address of the bike (XX:XX:XX:XX:XX:XX)")
+    parser.add_argument(
+        "--backend",
+        choices=["bluez", "esphome"],
+        default="bluez",
+        help="Connection backend (default: bluez)",
+    )
+    parser.add_argument(
+        "--esphome-host",
+        help="ESPHome proxy host address (required for esphome backend)",
+    )
+
+    args = parser.parse_args()
+    address = validate_address(args.address)
+
+    if args.backend == "esphome" and not args.esphome_host:
+        parser.error("--esphome-host is required when using --backend esphome")
+
     try:
-        asyncio.run(main(address))
+        asyncio.run(
+            main(address, backend=args.backend, esphome_host=args.esphome_host)
+        )
     except KeyboardInterrupt:
         raise SystemExit(130)
     except Exception as exc:

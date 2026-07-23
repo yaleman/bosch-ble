@@ -3,12 +3,14 @@ from __future__ import annotations
 import asyncio
 from contextlib import asynccontextmanager
 from contextlib import suppress
-from typing import Any, Callable
+from typing import Any, Callable, Literal
 
 from bleak import BleakClient
 
-from bosch_ble import dump_gatt, mcsp, messagebus
+from bosch_ble import dump_gatt, esphome_proxy, mcsp, messagebus
 from bosch_ble._common import normalize_uuid, Services
+
+Backend = Literal["bluez", "esphome"]
 
 
 NON_COMMAND_CHANNELS = tuple(
@@ -102,23 +104,50 @@ def build_handshake_response(
 
 
 @asynccontextmanager
-async def connected_client(address: str, timeout: float = 20.0):
+async def connected_client(
+    address: str,
+    *,
+    timeout: float = 20.0,
+    backend: Backend = "bluez",
+    esphome_host: str | None = None,
+):
     last_error: Exception | None = None
     for attempt in range(1, dump_gatt.DISCOVERY_RETRY_ATTEMPTS + 1):
         try:
-            state = await dump_gatt.prepare_connection(address)
-            target = dump_gatt.client_target_for_state(state)
-            async with BleakClient(target, timeout=timeout) as client:
-                if not client.is_connected:
-                    raise RuntimeError("Failed to connect")
-                try:
-                    await dump_gatt.stage_bosch_security(client, address)
-                except dump_gatt.BoschSecurityDescriptorMissing:
-                    pass
-                except RuntimeError:
-                    raise
-                yield client
-                return
+            if backend == "esphome":
+                if not esphome_host:
+                    raise RuntimeError("ESPHome host is required for esphome backend")
+                config = esphome_proxy.ESPHomeConfig(host=esphome_host)
+                async with esphome_proxy.esphome_proxy_context(config):
+                    async with BleakClient(address, timeout=timeout) as client:
+                        if not client.is_connected:
+                            raise RuntimeError("Failed to connect")
+                        try:
+                            await dump_gatt.stage_bosch_security(
+                                client, address, backend=backend
+                            )
+                        except dump_gatt.BoschSecurityDescriptorMissing:
+                            pass
+                        except RuntimeError:
+                            raise
+                        yield client
+                        return
+            else:
+                state = await dump_gatt.prepare_connection(address, backend=backend)
+                target = dump_gatt.client_target_for_state(state)
+                async with BleakClient(target, timeout=timeout) as client:
+                    if not client.is_connected:
+                        raise RuntimeError("Failed to connect")
+                    try:
+                        await dump_gatt.stage_bosch_security(
+                            client, address, backend=backend
+                        )
+                    except dump_gatt.BoschSecurityDescriptorMissing:
+                        pass
+                    except RuntimeError:
+                        raise
+                    yield client
+                    return
         except Exception as exc:
             last_error = exc
             message = dump_gatt.retry_message(exc, address)

@@ -9,7 +9,7 @@ import subprocess
 import sys
 from pathlib import Path
 from rich.text import Text
-from typing import Any
+from typing import Any, Literal
 
 from bleak import BleakScanner
 from bosch_ble._common import normalize_address
@@ -17,6 +17,8 @@ from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal
 from textual.widgets import DataTable, Static
+
+Backend = Literal["bluez", "esphome"]
 
 
 @dataclass
@@ -299,7 +301,13 @@ class ScannerApp(App[str | None]):
         Binding("ctrl+c", "quit", show=False),
     ]
 
-    def __init__(self, ignore_store_path: Path | None = None) -> None:
+    def __init__(
+        self,
+        ignore_store_path: Path | None = None,
+        *,
+        backend: Backend = "bluez",
+        esphome_host: str | None = None,
+    ) -> None:
         super().__init__()
         self.sort_mode = SortMode.ADDRESS
         self.hide_stale = False
@@ -310,6 +318,8 @@ class ScannerApp(App[str | None]):
         self.ignored_addresses = load_ignored_addresses(self.ignore_store_path)
         self.scanner: BleakScanner | None = None
         self.devices: dict[str, SeenDevice] = {}
+        self.backend = backend
+        self.esphome_host = esphome_host
 
     def compose(self) -> ComposeResult:
         yield Horizontal(
@@ -326,6 +336,18 @@ class ScannerApp(App[str | None]):
         table.focus()
 
         self.set_interval(self.REFRESH_INTERVAL_SECONDS, self.refresh_view)
+
+        if self.backend == "esphome":
+            from bosch_ble import esphome_proxy
+
+            if not self.esphome_host:
+                raise RuntimeError("ESPHome host is required for esphome backend")
+
+            config = esphome_proxy.ESPHomeConfig(host=self.esphome_host)
+            self._esphome_connection = await esphome_proxy.setup_esphome_proxy(config)
+        else:
+            self._esphome_connection = None
+
         self.scanner = BleakScanner(detection_callback=self.detection_callback)
         await self.scanner.start()
         self.refresh_view()
@@ -346,6 +368,10 @@ class ScannerApp(App[str | None]):
     async def on_unmount(self) -> None:
         if self.scanner is not None:
             await self.scanner.stop()
+        if hasattr(self, "_esphome_connection") and self._esphome_connection is not None:
+            from bosch_ble import esphome_proxy
+
+            await esphome_proxy.teardown_esphome_proxy(self._esphome_connection)
 
     def action_cycle_sort(self) -> None:
         self.sort_mode = self.sort_mode.next()
@@ -472,8 +498,31 @@ class ScannerApp(App[str | None]):
 
 
 def cli() -> None:
+    import argparse
+
+    parser = argparse.ArgumentParser(
+        description="Scan for BLE devices and optionally connect to dump GATT"
+    )
+    parser.add_argument(
+        "--backend",
+        choices=["bluez", "esphome"],
+        default="bluez",
+        help="Connection backend (default: bluez)",
+    )
+    parser.add_argument(
+        "--esphome-host",
+        help="ESPHome proxy host address (required for esphome backend)",
+    )
+
+    args = parser.parse_args()
+
+    if args.backend == "esphome" and not args.esphome_host:
+        parser.error("--esphome-host is required when using --backend esphome")
+
     try:
-        selected_address = ScannerApp().run()
+        selected_address = ScannerApp(
+            backend=args.backend, esphome_host=args.esphome_host
+        ).run()
     except KeyboardInterrupt:
         return
     finally:
@@ -481,10 +530,12 @@ def cli() -> None:
 
     if selected_address is not None:
         print(f"Connecting to {selected_address} (may prompt for pairing) ...")
-        subprocess.run(
-            [sys.executable, "-m", "bosch_ble.dump_gatt", selected_address],
-            check=False,
-        )
+        cmd = [sys.executable, "-m", "bosch_ble.dump_gatt", selected_address]
+        if args.backend != "bluez":
+            cmd.extend(["--backend", args.backend])
+        if args.esphome_host:
+            cmd.extend(["--esphome-host", args.esphome_host])
+        subprocess.run(cmd, check=False)
 
 
 def clear_terminal() -> None:

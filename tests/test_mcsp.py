@@ -181,7 +181,7 @@ def test_handshake_main_replies_on_mcsp_transport(
         (send_uuid, bytes.fromhex("10020307"), False),
     ]
     output = capsys.readouterr().out
-    assert "Connecting to AA:BB:CC:DD:EE:FF ..." in output
+    assert "Connecting to AA:BB:CC:DD:EE:FF via bluez ..." in output
     assert "RECV command=VersionCommand(version=3)" in output
     assert "SEND hex=10020307" in output
 
@@ -250,7 +250,7 @@ def test_connected_client_stages_bosch_security() -> None:
         async def __aexit__(self, exc_type, exc, tb) -> None:
             return None
 
-    async def fake_stage(client, address: str) -> None:
+    async def fake_stage(client, address: str, *, backend: str = "bluez") -> None:
         staged.append((client, address))
 
     async def run() -> None:
