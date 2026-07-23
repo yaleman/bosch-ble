@@ -83,11 +83,12 @@ We recommend reading the docs in this order:
 
 1. [Architecture Overview](architecture.md) -- high-level system design
 2. [BLE Communication](ble-communication.md) -- how the app talks to the bike
-3. [Backend & API](backend-api.md) -- cloud services and authentication
-4. [Data Layer](data-layer.md) -- local storage and repositories
-5. [UI & Navigation](ui-navigation.md) -- screens, fragments, and design system
-6. [Feature Modules](feature-modules.md) -- deep dives into major features
-7. [Module Catalog](module-catalog.md) -- complete listing of all ~100 modules
+3. [Pairing Flow](pairing-flow.md) -- deep dive into the bike pairing sequence
+4. [Backend & API](backend-api.md) -- cloud services and authentication
+5. [Data Layer](data-layer.md) -- local storage and repositories
+6. [UI & Navigation](ui-navigation.md) -- screens, fragments, and design system
+7. [Feature Modules](feature-modules.md) -- deep dives into major features
+8. [Module Catalog](module-catalog.md) -- complete listing of all ~100 modules
 
 ## Key Technologies
 
