@@ -13,7 +13,11 @@ dependencies = [
 ]
 
 [dependency-groups]
-dev = ["mypy>=1.20.1", "pytest>=9.0.3", "ruff>=0.15.11", "ty>=0.0.31"]
+dev = [
+ "pytest>=9.0.3",
+ "ruff>=0.15.11",
+ "ty>=0.0.31",
+]
 
 [project.scripts]
 bosch-ble-bluez-connect = "bosch_ble.bluez:connect_cli"
@@ -41,8 +45,3 @@ line-length = 100
 select = ["E1", "E4", "E7", "E9", "F"]
 
 [tool.ty]
-
-[tool.mypy]
-python-version = "3.13"
-warn_unused_ignores = true
-
