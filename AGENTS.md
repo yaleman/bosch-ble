@@ -28,6 +28,7 @@
 - Load `REMOTE_HOST` from the local shell environment via `direnv` before using host-helper scripts or SSH-based workflows.
 - Bluetooth code cannot be validated locally in this repo. All meaningful test and lint runs need to happen on the remote host.
 - The bike often turns off or stops advertising between attempts.
+- **ALWAYS write complete test scripts BEFORE starting a test cycle.** Do not iterate with inline code generation during live testing. Write the full script first, then run it once. The bike will time out and turn off if you take too long.
 - Before diagnosing protocol or pairing failures, confirm the bike is awake and visible to BlueZ.
 - Treat `Visible: no`, scan misses, and `Device ... not available` as bike-state failures first.
 - Only use runs with confirmed advertisement visibility as evidence for pairing or protocol conclusions.

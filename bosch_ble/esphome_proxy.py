@@ -6,11 +6,10 @@ from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
-from bleak import BleakClient
 from bleak.backends.device import BLEDevice
 
 if TYPE_CHECKING:
-    from bleak_esphome import APIConnectionManager
+    from bleak_esphome.backend.client import ESPHomeClientData
 
 
 DEFAULT_ESPHOME_PORT = 6053
@@ -38,26 +37,100 @@ def get_esphome_config_from_env() -> ESPHomeConfig | None:
 
 @dataclass(slots=True)
 class ESPHomeConnection:
-    manager: APIConnectionManager
+    client_data: ESPHomeClientData
+    _cleanup: Any  # Callable[[], None]
 
 
 async def setup_esphome_proxy(config: ESPHomeConfig) -> ESPHomeConnection:
-    from bleak_esphome import APIConnectionManager
+    """Set up ESP32 proxy connection and return client_data for creating clients."""
+    import habluetooth
+    from aioesphomeapi import APIClient, ReconnectLogic
+    from bleak_esphome import connect_scanner
 
-    device_config = {
-        "address": config.host,
-        "noise_psk": config.noise_psk,
-    }
+    # Initialize habluetooth manager if not already set
+    try:
+        habluetooth.get_manager()
+    except RuntimeError:
+        # Manager not set, create and set it
+        bt_manager = habluetooth.BluetoothManager()
+        habluetooth.set_manager(bt_manager)
 
-    manager = APIConnectionManager(device_config)
-    await manager.start()
+    # Create APIClient
+    cli = APIClient(
+        address=config.host,
+        port=config.port,
+        password=None,
+        noise_psk=config.noise_psk,
+    )
 
-    return ESPHomeConnection(manager=manager)
+    # Track cleanup callbacks and connection state
+    disconnect_callbacks: set[Any] = set()
+    unsetup_scanner: Any = None
+    unregister_scanner: Any = None
+    client_data_holder: list[Any] = []  # Use list to allow mutation in closure
+    connected_event = asyncio.Event()
+
+    async def on_connect() -> None:
+        nonlocal unsetup_scanner, unregister_scanner
+        try:
+            device_info = await cli.device_info()
+            client_data = connect_scanner(cli, device_info, True)
+            scanner = client_data.scanner
+            assert scanner is not None
+            unsetup_scanner = scanner.async_setup()
+            unregister_scanner = habluetooth.get_manager().async_register_scanner(scanner)
+            disconnect_callbacks.update(client_data.disconnect_callbacks)
+            client_data_holder.append(client_data)
+            connected_event.set()
+        except Exception as e:
+            print(f"Error in on_connect: {e}")
+            raise
+
+    async def on_disconnect(expected_disconnect: bool) -> None:
+        nonlocal unsetup_scanner, unregister_scanner
+        for callback in list(disconnect_callbacks):
+            callback()
+        disconnect_callbacks.clear()
+        if unsetup_scanner is not None:
+            unsetup_scanner()
+            unsetup_scanner = None
+        if unregister_scanner is not None:
+            unregister_scanner()
+            unregister_scanner = None
+        connected_event.clear()
+
+    # Create reconnect logic
+    reconnect_logic = ReconnectLogic(
+        client=cli,
+        on_disconnect=on_disconnect,
+        on_connect=on_connect,
+    )
+
+    # Start connection
+    await reconnect_logic.start()
+
+    # Wait for first connection
+    try:
+        await asyncio.wait_for(connected_event.wait(), timeout=DEFAULT_CONNECT_TIMEOUT)
+    except asyncio.TimeoutError:
+        await reconnect_logic.stop()
+        raise RuntimeError(f"Timeout connecting to ESP32 proxy at {config.host}")
+
+    if not client_data_holder:
+        await reconnect_logic.stop()
+        raise RuntimeError("No client_data received from ESP32 proxy")
+
+    client_data = client_data_holder[0]
+
+    def cleanup() -> None:
+        asyncio.create_task(reconnect_logic.stop())
+
+    return ESPHomeConnection(client_data=client_data, _cleanup=cleanup)
 
 
 async def teardown_esphome_proxy(connection: ESPHomeConnection) -> None:
     try:
-        await connection.manager.stop()
+        connection._cleanup()
     except Exception:
         pass
 
@@ -77,19 +150,34 @@ async def scan_via_esphome(
     timeout: float = DEFAULT_SCAN_TIMEOUT,
     detection_callback: Any = None,
 ) -> list[tuple[BLEDevice, Any]]:
-    from bleak import BleakScanner
+    """Scan for BLE devices via ESP32 proxy."""
+    import habluetooth
 
-    async with esphome_proxy_context(config):
-        scanner = BleakScanner(detection_callback=detection_callback)
-        await scanner.start()
-        try:
-            await asyncio.sleep(timeout)
-        finally:
-            await scanner.stop()
-
+    async with esphome_proxy_context(config) as conn:
+        # Get the habluetooth manager that has the ESP32 scanner registered
+        ha_manager = habluetooth.get_manager()
+        
+        # Wait for advertisements to come in
+        await asyncio.sleep(timeout)
+        
+        # Get discovered devices from the manager
         discovered: list[tuple[BLEDevice, Any]] = []
-        for device, adv in scanner.discovered_devices_and_advertisement_data.items():
-            discovered.append((device, adv))
+        devices = ha_manager.async_discovered_devices(connectable=True)
+        
+        for device in devices:
+            # Convert to BLEDevice format with required fields for ESPHomeClient
+            bleak_device = BLEDevice(
+                address=device.address,
+                name=device.name,
+                details={
+                    "source": config.host,
+                    "address_type": 0,  # PUBLIC address type
+                },
+            )
+            discovered.append((bleak_device, None))
+            
+            if detection_callback:
+                detection_callback(bleak_device, None)
 
         return discovered
 
@@ -100,7 +188,25 @@ async def esphome_bleak_client(
     address: str,
     *,
     timeout: float = DEFAULT_CONNECT_TIMEOUT,
+    pair: bool = False,
 ):
-    async with esphome_proxy_context(config):
-        async with BleakClient(address, timeout=timeout) as client:
+    """Create a BLE client connected through the ESP32 proxy."""
+    from bleak.backends.device import BLEDevice
+    from bleak_esphome.backend.client import ESPHomeClient
+
+    async with esphome_proxy_context(config) as conn:
+        # Create a BLEDevice for the target address
+        device = BLEDevice(
+            address=address,
+            name=None,
+            details={"source": config.host, "address_type": 0},
+        )
+        
+        # Create the ESPHomeClient using the client_data from the connection
+        client = ESPHomeClient(device, client_data=conn.client_data, timeout=timeout)
+        
+        try:
+            await client.connect(pair=pair)
             yield client
+        finally:
+            await client.disconnect()
