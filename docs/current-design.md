@@ -206,13 +206,18 @@ setup, or connection without retrying. It does not remove bonds or send MCSP tra
 An unpaired bike must advertise Bosch pairing readiness; paired bikes may use their
 ordinary advertisement state.
 
-`uv run python -m bosch_ble.trace_connect --precheck` checks required host tools and
-noninteractive sudo without scanning or connecting. Use it before the bike-on window.
+`uv run python -m bosch_ble.trace_connect --precheck` checks required host tools,
+noninteractive sudo, and actual passive monitor startup/cleanup without scanning
+or connecting. Use it in the same interactive session before the bike-on window.
+`--capture-check` runs just the passive monitor check without requiring privileges
+for the Python management helper.
 The live run captures btmon before any BLE activity and saves `btmon.log` and
 `summary.json` in the printed temporary evidence directory. Capture startup must
 succeed before scanning; the capture process is bounded and unrelated captures
 are not killed. A PTY keeps btmon output line-buffered without granting sudo
-access to a general-purpose wrapper command.
+access to a general-purpose wrapper command. The monitor wrapper uses null stdin
+so the timeout process group's terminal reads cannot suspend startup. Setup
+failures before preflight report `Visible: unknown`, not a scan miss.
 
 The summary uses enum outcomes and stages. It scopes events to the target address
 and connection handles, excludes capability listings, and records every complete

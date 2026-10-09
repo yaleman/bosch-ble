@@ -167,6 +167,7 @@ def test_capture_waits_for_banner_and_uses_bounded_unprivileged_pty(
             return self.returncode or 0
 
     async def spawn(*args: str, **kwargs: object) -> CaptureProcess:
+        assert kwargs["stdin"] == asyncio.subprocess.DEVNULL
         commands.append(args)
         return CaptureProcess()
 
@@ -183,3 +184,51 @@ def test_capture_waits_for_banner_and_uses_bounded_unprivileged_pty(
         "--flush", "--command", "sudo -n btmon --no-pager --color never --columns 160",
         "/dev/null",
     )]
+
+
+def test_capture_setup_failure_does_not_claim_bike_invisibility(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str],
+) -> None:
+    @asynccontextmanager
+    async def failed_capture(*, path: Path):
+        raise bluez.ConnectionSetupError(bluez.ConnectionSetupStep.CAPTURE, "controller", "not ready")
+        yield path
+
+    scan = AsyncMock()
+    connect = AsyncMock()
+    monkeypatch.setattr(bluez, "assert_controller_ready", lambda _address: None)
+    monkeypatch.setattr(bluez, "btmon_text_capture", failed_capture)
+    monkeypatch.setattr(bluez, "preflight_device", scan)
+    monkeypatch.setattr(bluez, "connect_device", connect)
+    outcome = asyncio.run(trace_connect.capture_connection(ADDRESS, tmp_path))
+    assert outcome is trace_connect.ConnectOutcome.SETUP_FAILED
+    assert json.loads((tmp_path / "summary.json").read_text())["visible"] is None
+    assert "Visible: unknown" in capsys.readouterr().out
+    scan.assert_not_awaited()
+    connect.assert_not_awaited()
+
+
+def test_precheck_verifies_capture_without_starting_bike_test(monkeypatch: pytest.MonkeyPatch) -> None:
+    capture = AsyncMock()
+    experiment = AsyncMock()
+    monkeypatch.setattr(trace_connect.sys, "argv", ["trace_connect", "--precheck"])
+    monkeypatch.setattr(trace_connect, "check_host", lambda: None)
+    monkeypatch.setattr(trace_connect, "check_capture", capture)
+    monkeypatch.setattr(trace_connect, "capture_connection", experiment)
+    trace_connect.cli()
+    capture.assert_awaited_once_with()
+    experiment.assert_not_awaited()
+
+
+def test_capture_check_does_not_require_management_privileges(monkeypatch: pytest.MonkeyPatch) -> None:
+    capture = AsyncMock()
+    experiment = AsyncMock()
+    host = AsyncMock()
+    monkeypatch.setattr(trace_connect.sys, "argv", ["trace_connect", "--capture-check"])
+    monkeypatch.setattr(trace_connect, "check_host", host)
+    monkeypatch.setattr(trace_connect, "check_capture", capture)
+    monkeypatch.setattr(trace_connect, "capture_connection", experiment)
+    trace_connect.cli()
+    capture.assert_awaited_once_with()
+    host.assert_not_called()
+    experiment.assert_not_awaited()

@@ -98,7 +98,7 @@ class BluezState:
 class PairAttemptSummary:
     pair_backend: str
     privacy: str
-    visible: bool
+    visible: bool | None
     name: str | None
     assist_error: str | None
     create_connection_seen: bool
@@ -525,7 +525,7 @@ def summarize_btmon_trace(
     *,
     pair_backend: str,
     privacy: str,
-    visible: bool,
+    visible: bool | None,
     name: str | None,
     assist_error: str | None,
     trace_path: str,
@@ -1212,6 +1212,8 @@ async def btmon_text_capture(prefix: str = "bosch-btmon-", *, path: Path | None 
         "--command",
         "sudo -n btmon --no-pager --color never --columns 160",
         "/dev/null",
+        # timeout uses a separate process group; script must not read the caller's TTY.
+        stdin=asyncio.subprocess.DEVNULL,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.STDOUT,
     )

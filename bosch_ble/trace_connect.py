@@ -37,6 +37,12 @@ def check_host() -> None:
         )
 
 
+async def check_capture() -> None:
+    async with bluez.btmon_text_capture() as path:
+        print(f"Passive capture ready: {path}", flush=True)
+    print("Passive capture stopped. No scan or connection was attempted.")
+
+
 async def capture_connection(address: str, directory: Path) -> ConnectOutcome:
     outcome = ConnectOutcome.CONNECT_FAILED
     error: str | None = None
@@ -66,7 +72,7 @@ async def capture_connection(address: str, directory: Path) -> ConnectOutcome:
     text = trace_path.read_text(errors="replace") if trace_path.exists() else ""
     summary = bluez.summarize_btmon_trace(
         text, pair_backend="connect", privacy="off",
-        visible=preflight.visible if preflight else False,
+        visible=preflight.visible if preflight else None,
         name=preflight.name if preflight else None, assist_error=error,
         trace_path=str(trace_path), address=address,
     )
@@ -88,12 +94,18 @@ async def capture_connection(address: str, directory: Path) -> ConnectOutcome:
 def cli() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("address", type=validate_address, nargs="?", default="00:04:63:BA:64:FC")
-    parser.add_argument("--precheck", action="store_true", help="Check tools and sudo without BLE activity")
+    checks = parser.add_mutually_exclusive_group()
+    checks.add_argument("--precheck", action="store_true", help="Check tools, sudo, and passive capture without scanning")
+    checks.add_argument("--capture-check", action="store_true", help="Check passive monitor startup and cleanup only")
     args = parser.parse_args()
     try:
+        if args.capture_check:
+            asyncio.run(check_capture())
+            return
         check_host()
         if args.precheck:
-            print("Host tools and noninteractive sudo are ready. No bike test was run.")
+            asyncio.run(check_capture())
+            print("Host tools, noninteractive sudo, and capture are ready. No bike test was run.")
             return
         directory = Path(tempfile.mkdtemp(prefix="bosch-connect-"))
         print(f"Evidence: {directory}", flush=True)
