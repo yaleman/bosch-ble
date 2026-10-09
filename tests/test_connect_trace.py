@@ -5,6 +5,7 @@ import json
 from contextlib import asynccontextmanager
 from pathlib import Path
 from subprocess import CompletedProcess
+from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
@@ -50,6 +51,58 @@ def bike_state(*, visible: bool = True) -> bluez.BluezState:
         bluetoothctl=CompletedProcess([], 0, stdout="", stderr=""), busctl=None,
         pairing_advertisement=True if visible else None,
     )
+
+
+@pytest.mark.parametrize(("company", "payload", "expected"), [
+    (0x02A6, "10eb01030001", True),
+    (0x02A6, "10eb01030000", False),
+    (0x02A6, "10eb01030002", False),
+    (0x004C, "10eb01030001", False),
+    (0x02A6, "01030001", False),
+    (0x02A6, "10eb010300", False),
+    (0x02A6, "10eb0103000100", False),
+    (0x02A6, "", False),
+])
+def test_bosch_pairing_field_matches_android_payload(
+    company: int, payload: str, expected: bool,
+) -> None:
+    advertisement = SimpleNamespace(manufacturer_data={company: bytes.fromhex(payload)})
+    assert bluez.is_bosch_pairing_advertisement(advertisement) is expected
+
+
+@pytest.mark.parametrize("component", range(6))
+def test_pairability_does_not_depend_on_exact_component_payload(component: int) -> None:
+    advertisement = SimpleNamespace(manufacturer_data={0x02A6: bytes([0x10, 0xEB, 1, component, 0, 1])})
+    assert bluez.is_bosch_pairing_advertisement(advertisement) is True
+
+
+def test_missing_advertisement_is_unknown() -> None:
+    assert bluez.is_bosch_pairing_advertisement(None) is None
+    assert bluez.is_bosch_pairing_advertisement(SimpleNamespace(manufacturer_data={})) is False
+
+
+def test_scan_retains_pairing_scan_response_during_stop(monkeypatch: pytest.MonkeyPatch) -> None:
+    device = SimpleNamespace(address=ADDRESS, name="smart system eBike")
+    pairing = SimpleNamespace(manufacturer_data={0x02A6: bytes.fromhex("10eb01030001")})
+    ordinary = SimpleNamespace(manufacturer_data={})
+
+    class Scanner:
+        def __init__(self, detection_callback) -> None:
+            self.callback = detection_callback
+
+        async def start(self) -> None:
+            self.callback(SimpleNamespace(address="AA:BB:CC:DD:EE:FF"), pairing)
+            self.callback(device, ordinary)
+            self.callback(device, pairing)
+
+        async def stop(self) -> None:
+            self.callback(device, ordinary)
+
+    monkeypatch.setattr(bluez, "BleakScanner", Scanner)
+    found, advertisement = asyncio.run(bluez.scan_device_advertisement(ADDRESS.lower(), timeout=1.0))
+    assert found is device
+    assert advertisement is pairing
+    assert bluez.is_bosch_pairing_advertisement(advertisement) is True
 
 
 def test_initial_parameters_ignore_later_bike_requested_update() -> None:

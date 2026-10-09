@@ -73,6 +73,10 @@ Important invariants:
 
 - `Visible: no` is a bike-state failure first, not protocol evidence
 - unpaired connect attempts must reject generic visibility as sufficient readiness
+- pairing readiness reads byte 5 of the six-byte manufacturer payload for company
+  `0x02A6`, matching the Android BES3 mapper; `10eb01030001` is pairable
+- each scan retains its first pairing-ready advertisement through scanner shutdown;
+  a new post-reset scan must independently confirm readiness again
 - connection-parameter loading happens before the BlueZ connect attempt
 - the connect-first path is the main user-facing path for live work
 

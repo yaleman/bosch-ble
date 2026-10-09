@@ -6,6 +6,6 @@ out="/tmp/manual-connect-after-load-conn-$(date +%s).out"
 
 sudo -v
 uv run python -m bosch_ble.trace_connect --precheck
-read -r -p "Host ready. Turn on the bike, open Bluetooth pairing, then press Enter: " ready
+read -r -p "Host ready. Purion 200: turn on, hold power >3s until pairing appears, release, then press Enter: " ready
 echo "OUT:${out}"
 uv run python -m bosch_ble.trace_connect "${addr}" | tee "${out}"

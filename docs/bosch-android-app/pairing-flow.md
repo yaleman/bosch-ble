@@ -116,7 +116,7 @@ Classification checks service UUIDs and manufacturer data in order:
 | 5 | **BES3** | Service UUID `0000FE02-0000-1000-8000-00805F9B34FB` + valid manufacturer data |
 | 6 | Unknown | Fallback |
 
-**Source:** `smali_classes3/com/bosch/ebike/bluetoothcommunication/internal/scanning/AdvertisementDataMappingKt.smali` (line ~248)
+**Source:** `smali_classes3/com/bosch/ebike/bluetoothcommunication/internal/AdvertisementDataMappingKt.smali` (line ~248)
 
 #### BES3 Advertisement Data Format
 
@@ -127,38 +127,42 @@ Manufacturer ID: 0x02A6 (678 decimal = Bosch)
 Data length: exactly 6 bytes
 
 Byte layout:
-  [0] eBikeComponentIdVersion
-  [1] eBikeComponentId
-  [2] dataFormatVersion
-  [3] pairable flag (MUST equal 0x01 for pairing)
-  [4] reserved
-  [5] reserved
+  [0..1] prefix (not interpreted by the Android BES3 mapper)
+  [2] eBikeComponentIdVersion
+  [3] eBikeComponentId
+  [4] dataFormatVersion
+  [5] pairable flag (MUST equal 0x01 for pairing)
 ```
 
 Component IDs map to: BRC3100 (0), BRC3300 (1), BRC3600 (2), BRC3800 (3), BRC3200 (4), BRC3610 (5)
 
-**Source:** `smali_classes3/com/bosch/ebike/bluetoothcommunication/internal/scanning/BES3AdvertismentDataMappingKt.smali` (line 7)
+**Source:** `smali_classes3/com/bosch/ebike/bluetoothcommunication/internal/bes3/BES3AdvertismentDataMappingKt.smali` (method `bes3AdvertisementInformation`)
 
 #### Pairability Determination
 
 | Peripheral Type | Pairable When |
 |---|---|
-| BES3 | byte[3] == 0x01 in manufacturer data |
+| BES3 | byte[5] == 0x01 in the six-byte Bosch manufacturer payload |
 | BES2 | Never (`NotPairable(IsBES2Bike)`) |
 | COBI | Never (`NotPairable(IsCOBIBike)` or `NotPairable(NotInPairingMode)`) |
 | HRM | Never (`NotPairable(IsHeartRateMonitor)`) |
 | Unknown | `Pairability.Unknown` |
 
-**Source:** `smali_classes3/com/bosch/ebike/bluetoothcommunication/internal/scanning/AdvertisementDataMappingKt.smali` (line ~13)
+**Source:** `smali_classes3/com/bosch/ebike/bluetoothcommunication/internal/AdvertisementDataMappingKt.smali` (method `getPairability`)
 
 #### Key Takeaway for Linux Implementation
 
 The app looks for:
 1. Service UUID `0000FE02-0000-1000-8000-00805F9B34FB` in advertisement
 2. Manufacturer data with company ID `0x02A6` and exactly 6 bytes
-3. byte[3] == `0x01` (pairable flag)
+3. byte[5] == `0x01` (pairable flag)
 
-This matches our existing `BOSCH_PAIRING_MANUFACTURER_PAYLOAD = bytes.fromhex("01030001")` check in `bluez.py`, but note that the Android app checks the full 6-byte payload, not just the last 4 bytes.
+Bleak strips the two-byte Bluetooth company ID, but retains all six payload bytes.
+The captured Purion 200 payload is `10eb01030001`: component version 1,
+component ID 3 (BRC3800), data format 0, and pairable 1. The former Linux check
+compared that entire payload with `01030001`, incorrectly rejecting it. Linux now
+selects company `0x02A6`, validates the six-byte length, and reads the final field,
+matching the Android mapper rather than comparing an exact component-specific blob.
 
 ### Phase 3: Companion Device Manager Association (Android 12+ only)
 
@@ -314,7 +318,7 @@ User taps "Pair Bike"
   Post-filter for:
     - BES3 service UUID 0000FE02-...
     - Manufacturer data: company 0x02A6, 6 bytes
-    - Pairable flag: byte[3] == 0x01
+    - Pairable flag: byte[5] == 0x01
   |
   v (bike found)
 [Detected State]
@@ -363,7 +367,7 @@ User taps "Pair Bike"
 | Aspect | Android App | Our Linux Path |
 |---|---|---|
 | Discovery | Unfiltered scan, post-process for BES3 | Same -- `scan_device_advertisement()` with post-filter |
-| Pairing advertisement check | byte[3] == 0x01 in mfg data | Same -- `BOSCH_PAIRING_MANUFACTURER_PAYLOAD` check |
+| Pairing advertisement check | Company 0x02A6, 6 bytes, byte[5] == 0x01 | Same -- parsed pairable field |
 | Connection approach | connect-first, implicit bonding | Same -- `connect_device()` then `stage_bosch_security()` |
 | CCCD write for security trigger | Write `0x2902` to enable notifications | Same -- `write_gatt_descriptor(descriptor.handle, b"\x00\x00")` |
 | MCSP service UUID | `00000010-EAA2-11E9-81B4-2A2AE2DBCCE4` | Same -- `BOSCH_SERVICE_UUID` |
@@ -417,8 +421,8 @@ The ESP32 should produce SMP parameters similar to the phone (IRK instead of CSR
 | Pairing states | `smali_classes3/.../bikepairing/services/PairingProcessState.smali` | State enum |
 | Error cases | `smali_classes3/.../bikepairing/services/FailedErrorCase.smali` | 19 failure modes |
 | BLE scanning | `smali_classes3/.../bluetoothcommunication/internal/scanning/CentralManagerImplKt.smali` | Scan parameters |
-| Advertisement parsing | `smali_classes3/.../bluetoothcommunication/internal/scanning/AdvertisementDataMappingKt.smali` | Peripheral type detection |
-| BES3 advertisement | `smali_classes3/.../bluetoothcommunication/internal/scanning/BES3AdvertismentDataMappingKt.smali` | BES3 mfg data format |
+| Advertisement parsing | `smali_classes3/.../bluetoothcommunication/internal/AdvertisementDataMappingKt.smali` | Peripheral type detection |
+| BES3 advertisement | `smali_classes3/.../bluetoothcommunication/internal/bes3/BES3AdvertismentDataMappingKt.smali` | BES3 mfg data format |
 | GATT connection | `smali_classes3/.../ble/wrapper/GattDeviceImplKt.smali` | connectGatt() call |
 | GATT peripheral | `smali_classes3/.../bluetoothcommunication/connection/GattWrapperPeripheral.smali` | Post-connection setup |
 | Bond state | `smali_classes3/.../bluetoothcommunication/connection/DefaultBondStateManager.smali` | Bond monitoring |

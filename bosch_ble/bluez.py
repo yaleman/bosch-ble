@@ -65,7 +65,7 @@ PHONE_LIKE_LE_CONNECTION_UNITS = {
     "latency": 0,
     "timeout": 72,
 }
-BOSCH_PAIRING_MANUFACTURER_PAYLOAD = bytes.fromhex("01030001")
+BOSCH_MANUFACTURER_ID = 0x02A6
 
 
 def log_agent_event(message: str) -> None:
@@ -341,10 +341,12 @@ def is_bosch_pairing_advertisement(advertisement_data: Any | None) -> bool | Non
     if advertisement_data is None:
         return None
     manufacturer_data = getattr(advertisement_data, "manufacturer_data", None) or {}
-    for payload in manufacturer_data.values():
-        if bytes(payload) == BOSCH_PAIRING_MANUFACTURER_PAYLOAD:
-            return True
-    return False
+    payload = manufacturer_data.get(BOSCH_MANUFACTURER_ID)
+    if payload is None or len(payload) != 6:
+        return False
+    # Android's BES3 mapper reads the pairable field at offset 5 of the six-byte payload.
+    # Bleak removes the company ID, not the first two payload bytes (10eb on this bike).
+    return payload[5] == 1
 
 
 async def scan_device_advertisement(
@@ -360,6 +362,8 @@ async def scan_device_advertisement(
         nonlocal found_device, found_advertisement
         device_address = getattr(device, "address", None)
         if not isinstance(device_address, str) or normalize_address(device_address) != target_address:
+            return
+        if pairing_seen.is_set():
             return
         found_device = device
         found_advertisement = advertisement_data
