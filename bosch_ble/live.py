@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Awaitable
 from contextlib import asynccontextmanager
 from contextlib import suppress
-from typing import Any, Callable, Literal
+from typing import Any, Callable, Literal, Protocol
 
 from bleak import BleakClient
 
@@ -24,6 +25,14 @@ MessageHandler = Callable[[mcsp.Frame, messagebus.MessageFrame], None]
 DecodeErrorHandler = Callable[[bytes | mcsp.Frame, Exception], None]
 NotifyHandler = Callable[[Any, bytes], None]
 SendHandler = Callable[[bytes], None]
+
+
+class McspClient(Protocol):
+    def start_notify(self, uuid: str, callback: Callable[[Any, bytearray], None]) -> Awaitable[None]: ...
+
+    def stop_notify(self, uuid: str) -> Awaitable[None]: ...
+
+    def write_gatt_char(self, uuid: str, data: bytes, response: bool = False) -> Awaitable[None]: ...
 
 
 def find_mcsp_transport(services: Services) -> tuple[str, str]:
@@ -164,7 +173,7 @@ async def connected_client(
 class McspLiveSession:
     def __init__(
         self,
-        client: BleakClient,
+        client: McspClient,
         receive_uuid: str,
         send_uuid: str,
         *,

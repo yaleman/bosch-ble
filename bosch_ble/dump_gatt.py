@@ -15,6 +15,7 @@ from bosch_ble._common import (
     format_cli_error,
     normalize_uuid,
     Services,
+    SecurityClient,
     validate_address,
 )
 
@@ -60,7 +61,7 @@ def find_bosch_security_descriptor(services: Services) -> BleakDescriptor:
 
 
 async def stage_bosch_security(
-    client: BleakClient,
+    client: SecurityClient,
     address: str,
     *,
     backend: Backend = "bluez",

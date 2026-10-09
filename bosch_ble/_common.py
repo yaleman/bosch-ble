@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import re
 from datetime import datetime
-from collections.abc import Awaitable
+from collections.abc import Awaitable, Sequence
 from typing import Any, Iterable, Protocol
 
 BLE_ADDRESS_RE = re.compile(r"^([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}$")
@@ -45,13 +45,10 @@ class BleakCharacteristic(Protocol):
     def uuid(self) -> str: ...
 
     @property
-    def properties(self) -> list[str]: ...
+    def properties(self) -> Sequence[str]: ...
 
     @property
-    def characteristics(self) -> list[BleakCharacteristic]: ...
-
-    @property
-    def descriptors(self) -> list[BleakDescriptor]: ...
+    def descriptors(self) -> Sequence[BleakDescriptor]: ...
 
 
 class BleakService(Protocol):
@@ -59,10 +56,22 @@ class BleakService(Protocol):
     def uuid(self) -> str: ...
 
     @property
-    def characteristics(self) -> list[BleakCharacteristic]: ...
+    def characteristics(self) -> Sequence[BleakCharacteristic]: ...
 
 
 Services = Iterable[BleakService]
+
+
+class SecurityClient(Protocol):
+    @property
+    def services(self) -> Services: ...
+
+    @property
+    def is_connected(self) -> bool: ...
+
+    def pair(self) -> Awaitable[None]: ...
+
+    def write_gatt_descriptor(self, handle: int, data: bytes, /) -> Awaitable[None]: ...
 
 
 class BluezInterface(Protocol):

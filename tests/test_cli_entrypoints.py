@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import sys
+from collections.abc import Callable
 from contextlib import asynccontextmanager
 from pathlib import Path
 from subprocess import CompletedProcess
@@ -131,7 +132,7 @@ def test_find_bosch_security_descriptor_fails_cleanly_when_service_is_missing() 
 
 
 def test_stage_bosch_security_pairs_after_insufficient_encryption() -> None:
-    events: list[tuple[str, object]] = []
+    events: list[tuple[object, ...]] = []
     descriptor = FakeDescriptor(0x001F, "00002902-0000-1000-8000-00805f9b34fb")
     service = FakeServiceWithCharacteristics(
         "00000010-eaa2-11e9-81b4-2a2ae2dbcce4",
@@ -201,7 +202,7 @@ def test_stage_bosch_security_pairs_after_insufficient_encryption() -> None:
 
 
 def test_stage_bosch_security_skips_cccd_write_when_device_is_already_paired() -> None:
-    events: list[tuple[str, object]] = []
+    events: list[tuple[object, ...]] = []
     descriptor = FakeDescriptor(0x001F, "00002902-0000-1000-8000-00805f9b34fb")
     service = FakeServiceWithCharacteristics(
         "00000010-eaa2-11e9-81b4-2a2ae2dbcce4",
@@ -247,7 +248,7 @@ def test_stage_bosch_security_skips_cccd_write_when_device_is_already_paired() -
 
 
 def test_stage_bosch_security_pairs_when_direct_cccd_write_is_blocked_on_unpaired_device() -> None:
-    events: list[tuple[str, object]] = []
+    events: list[tuple[object, ...]] = []
     descriptor = FakeDescriptor(0x001F, "00002902-0000-1000-8000-00805f9b34fb")
     service = FakeServiceWithCharacteristics(
         "00000010-eaa2-11e9-81b4-2a2ae2dbcce4",
@@ -418,7 +419,7 @@ def test_assist_connection_runs_pair_trust_connect_inside_pairing_agent() -> Non
     async def run() -> None:
         async def fake_run_command(argv: list[str], timeout: float = 15.0) -> CompletedProcess[str]:
             events.append(tuple(argv))
-            results = {
+            results: dict[tuple[str, ...], CompletedProcess[str]] = {
                 ("bluetoothctl", "info", "AA:BB:CC:DD:EE:FF"): info_result,
                 ("bluetoothctl", "connect", "AA:BB:CC:DD:EE:FF"): connect_result,
             }
@@ -512,7 +513,7 @@ def test_assist_connection_skips_pair_and_trust_when_device_is_already_bonded() 
     async def run() -> None:
         async def fake_run_command(argv: list[str], timeout: float = 15.0) -> CompletedProcess[str]:
             events.append(tuple(argv))
-            results = {
+            results: dict[tuple[str, ...], CompletedProcess[str]] = {
                 ("bluetoothctl", "info", "AA:BB:CC:DD:EE:FF"): info_result,
                 ("bluetoothctl", "connect", "AA:BB:CC:DD:EE:FF"): connect_result,
             }
@@ -659,7 +660,7 @@ def test_assist_connection_retries_transient_pair_failure_before_succeeding() ->
 
         async def fake_run_command(argv: list[str], timeout: float = 15.0) -> CompletedProcess[str]:
             events.append(tuple(argv))
-            results = {
+            results: dict[tuple[str, ...], CompletedProcess[str]] = {
                 ("bluetoothctl", "info", "AA:BB:CC:DD:EE:FF"): info_result,
                 ("bluetoothctl", "connect", "AA:BB:CC:DD:EE:FF"): connect_result,
             }
@@ -750,7 +751,7 @@ def test_assist_connection_refreshes_device_when_bluetoothctl_info_is_unavailabl
     async def run() -> None:
         async def fake_run_command(argv: list[str], timeout: float = 15.0) -> CompletedProcess[str]:
             events.append(tuple(argv))
-            results = {
+            results: dict[tuple[str, ...], CompletedProcess[str]] = {
                 ("bluetoothctl", "info", "AA:BB:CC:DD:EE:FF"): unavailable_info_result,
                 ("bluetoothctl", "connect", "AA:BB:CC:DD:EE:FF"): connect_result,
             }
@@ -984,8 +985,9 @@ def test_prepare_phone_like_pairing_controller_raises_on_failure() -> None:
 
     async def run() -> None:
         with patch.object(bluez, "run_command_async", side_effect=results):
-            with pytest.raises(RuntimeError, match="BlueZ set-sysconfig failed: Rejected"):
+            with pytest.raises(bluez.ConnectionSetupError) as error:
                 await bluez.bluez_prepare_phone_like_pairing_controller()
+            assert error.value.step is bluez.ConnectionSetupStep.SYS_CONFIG
 
     asyncio.run(run())
 
@@ -1337,7 +1339,7 @@ def test_bluez_diagnose_pair_cli_runs_all_attempts(
                 disconnect_reason=None,
                 att_seen=False,
                 smp_seen=False,
-                highest_stage="remote_features",
+                highest_stage=bluez.TraceStage.REMOTE_FEATURES,
                 trace_path="/tmp/trace.log",
             )
         )
@@ -1694,6 +1696,7 @@ def test_prepare_connection_accepts_connected_state_when_services_do_not_resolve
             with patch.object(dump_gatt.bluez, "connect_device", new=AsyncMock(return_value=connected_state)):
                 state = await dump_gatt.prepare_connection("AA:BB:CC:DD:EE:FF")
 
+        assert state is not None
         assert state.address == "AA:BB:CC:DD:EE:FF"
         assert state.connected is True
         assert state.services_resolved is False
@@ -1733,6 +1736,7 @@ def test_prepare_connection_prefers_fresh_connected_device_handle() -> None:
             with patch.object(dump_gatt.bluez, "connect_device", new=AsyncMock(return_value=connected_state)):
                 state = await dump_gatt.prepare_connection("AA:BB:CC:DD:EE:FF")
 
+        assert state is not None
         assert state.device is fresh_device
 
     asyncio.run(run())
@@ -1759,7 +1763,7 @@ def test_connect_device_connects_without_pairing() -> None:
     async def run() -> None:
         async def fake_run_command(argv: list[str], timeout: float = 15.0) -> CompletedProcess[str]:
             events.append(tuple(argv))
-            results = {
+            results: dict[tuple[str, ...], CompletedProcess[str]] = {
                 ("bluetoothctl", "info", "AA:BB:CC:DD:EE:FF"): info_result,
                 ("bluetoothctl", "connect", "AA:BB:CC:DD:EE:FF"): connect_result,
             }
@@ -2019,7 +2023,7 @@ def test_probe_main_uses_dump_gatt_target_and_logs_probe_results(
 ) -> None:
     targets: list[object] = []
     writes: list[tuple[str, bytes, bool]] = []
-    callbacks: dict[str, object] = {}
+    callbacks: dict[str, Callable[[object, bytearray], None]] = {}
     target = object()
 
     notify_char = FakeCharacteristicWithDescriptors(

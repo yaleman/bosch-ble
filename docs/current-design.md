@@ -31,6 +31,14 @@ The most important practical constraints are:
 
 Treat `findings/` as the primary evidence base for live-state conclusions.
 
+The historical Linux baseline reached ATT/GATT with privacy off and initial
+LE connection intervals of 30/30 ms, latency 0, and a 720 ms supervision timeout.
+Matching these settings is a comparison target, not proof of a working session.
+The bike also requested 20/40 ms and 4000 ms after that successful connection;
+initial setup and subsequent updates must be distinguished in trace analysis.
+See `findings/2026-10-09T10-17-09-historical-connection-baseline.md` for the
+evidence and its limits. No historical stable Python MCSP revision is established.
+
 ## Design Priorities
 
 1. Fail early on bad evidence.
@@ -55,6 +63,11 @@ Treat `findings/` as the primary evidence base for live-state conclusions.
 - pairing/trust/connect helpers
 - the BlueZ pairing agent
 - diagnostic summaries from `btmon`
+
+The main connection and explicit pairing diagnostics share controller preparation,
+post-reset scanning, readiness gating, and parameter loading. Parameter loading
+happens immediately before the connect/pair operation and requires trusted mgmt
+access. A failure stops the attempt rather than silently continuing.
 
 Important invariants:
 
@@ -156,6 +169,7 @@ When deciding whether to change behavior:
 ## Related Docs
 
 - `findings/README.md`: rules for recording live evidence
+- `findings/2026-10-09T10-17-09-historical-connection-baseline.md`: historical connection comparison
 - `docs/2026-04-20-pairing-blocker-summary.md`: focused note on the current pairing blocker and host-side explanation
 - `docs/makerdiary-ble-sniffer-ubuntu24.md`: over-the-air capture setup for phone-versus-Linux comparisons
 - `docs/superpowers/specs/2026-04-17-scanner-tui-design.md`: scanner-specific UI design note
@@ -168,7 +182,43 @@ Canonical verification commands:
 
 ```bash
 ssh "$REMOTE_HOST" "cd ~/bosch-ble && uv run pytest -q"
-ssh "$REMOTE_HOST" "cd ~/bosch-ble && uv run ruff check bosch_ble tests"
+ssh "$REMOTE_HOST" "cd ~/bosch-ble && uv run ruff check"
+ssh "$REMOTE_HOST" "cd ~/bosch-ble && uv run ty check"
 ```
 
-Local runs can help with fast feedback for pure unit coverage, but they are not sufficient evidence for live Bluetooth behavior.
+Run all test, lint, and type verification remotely after syncing the worktree.
+Passing those checks does not establish live Bluetooth behavior.
+
+## Prepared Connection Experiment
+
+Prepare and sync the full code and test script before requesting a bike-on window.
+Load `REMOTE_HOST` through direnv. Run remote pytest, Ruff, and ty before live work.
+The existing `scripts/manual-connect-after-load-conn` wrapper launches the host
+script, which authenticates sudo and checks prerequisites while the bike can stay
+off. It then prompts for the bike-on window, runs `bosch_ble.trace_connect` once,
+and retains terminal output. The cached sudo credential stays in the same
+interactive session; an unrelated SSH session cannot be assumed to share it.
+
+The experiment checks controller availability, confirms advertisement visibility,
+uses the shared connect-first setup with privacy off, waits for service resolution,
+and checks the connection again after three seconds. It stops on failed readiness,
+setup, or connection without retrying. It does not remove bonds or send MCSP traffic.
+An unpaired bike must advertise Bosch pairing readiness; paired bikes may use their
+ordinary advertisement state.
+
+`uv run python -m bosch_ble.trace_connect --precheck` checks required host tools and
+noninteractive sudo without scanning or connecting. Use it before the bike-on window.
+The live run captures btmon before any BLE activity and saves `btmon.log` and
+`summary.json` in the printed temporary evidence directory. Capture startup must
+succeed before scanning; the capture process is bounded and unrelated captures
+are not killed. A PTY keeps btmon output line-buffered without granting sudo
+access to a general-purpose wrapper command.
+
+The summary uses enum outcomes and stages. It scopes events to the target address
+and connection handles, excludes capability listings, and records every complete
+initial LE Create Connection parameter set separately from later updates.
+`baseline_reached` requires matching initial parameters, observed ATT traffic,
+and a connected, service-resolved state after the observation interval. Other
+outcomes identify unavailable bike state, setup failure, connection failure,
+unknown/different parameters, or missing ATT evidence. This experiment establishes
+a transport baseline only; pairing and a sustained MCSP session need later evidence.

@@ -82,16 +82,15 @@ def test_manual_connect_after_load_conn_runs_interactive_remote_trace(
 
     assert 'host="${1:-${REMOTE_HOST:?REMOTE_HOST must be set}}"' in script
     assert 'addr="${2:-00:04:63:BA:64:FC}"' in script
-    assert "ssh -tt" in script
+    assert "-tt" in script
     assert "./scripts/manual-connect-after-load-conn-host" in script
     assert 'addr="${1:-00:04:63:BA:64:FC}"' in host_script
     assert "sudo -v" in host_script
-    assert '-m bosch_ble.mgmt \\' in host_script
-    assert 'load-conn-params \\' in host_script
-    assert 'sudo timeout 25s btmon' in host_script
-    assert 'bluetoothctl connect "${addr}"' in host_script
+    assert "trace_connect --precheck" in host_script
+    assert "read -r -p" in host_script
+    assert 'uv run python -m bosch_ble.trace_connect "${addr}"' in host_script
+    assert "pkill" not in host_script
     assert 'echo "OUT:${out}"' in host_script
-    assert 'echo "LOG:${log}"' in host_script
 
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
@@ -121,10 +120,28 @@ def test_manual_connect_after_load_conn_runs_interactive_remote_trace(
 
     assert result.returncode == 0, result.stderr
     assert log_path.read_text().splitlines() == [
+        "-o", "BatchMode=yes",
+        "-o", "UseKeychain=yes",
+        "-o", "IdentitiesOnly=yes",
         "-tt",
         "bikebox",
         "cd ~/bosch-ble && ./scripts/manual-connect-after-load-conn-host '00:04:63:BA:64:FC'",
     ]
+
+
+def test_manual_connect_host_script_preserves_experiment_failure(tmp_path: Path) -> None:
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    for name, code in (("sudo", 0), ("uv", 7)):
+        command = bin_dir / name
+        command.write_text(f"#!/bin/sh\nexit {code}\n")
+        command.chmod(0o755)
+    result = subprocess.run(
+        ["bash", "scripts/manual-connect-after-load-conn-host"],
+        env=os.environ | {"PATH": f"{bin_dir}:{os.environ['PATH']}"},
+        capture_output=True, text=True, check=False,
+    )
+    assert result.returncode == 7
 
 
 def test_bluetoothd_debug_enable_runs_noninteractive_single_ssh_session(

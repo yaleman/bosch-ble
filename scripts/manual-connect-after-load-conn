@@ -4,4 +4,4 @@ set -euo pipefail
 host="${1:-${REMOTE_HOST:?REMOTE_HOST must be set}}"
 addr="${2:-00:04:63:BA:64:FC}"
 
-ssh -tt "${host}" "cd ~/bosch-ble && ./scripts/manual-connect-after-load-conn-host '${addr}'"
+ssh -o BatchMode=yes -o UseKeychain=yes -o IdentitiesOnly=yes -tt "${host}" "cd ~/bosch-ble && ./scripts/manual-connect-after-load-conn-host '${addr}'"

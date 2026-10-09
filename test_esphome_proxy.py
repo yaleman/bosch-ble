@@ -95,9 +95,12 @@ async def main():
         print(f"✓ Connected: {client.is_connected}")
         
         # Discover services
-        services = client.services
+        discovered_services = client.services
+        if discovered_services is None:
+            raise RuntimeError("Service discovery did not return services")
+        services = list(discovered_services)
         print(f"✓ Found {len(services)} services")
-        for s in list(services)[:10]:
+        for s in services[:10]:
             print(f"  Service: {s.uuid}")
         
         await client.disconnect()

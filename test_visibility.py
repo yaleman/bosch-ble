@@ -25,7 +25,7 @@ async def main():
                 bike_found = True
         
         if not bike_found:
-            print(f"✗ Bike not visible")
+            print("✗ Bike not visible")
             print("\nFirst 10 devices:")
             for device, adv in devices[:10]:
                 print(f"  {device.address}: {device.name or 'Unknown'}")

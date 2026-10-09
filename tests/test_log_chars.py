@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 from bosch_ble import log_chars, mcsp
+from bosch_ble._common import BleakDescriptor
 
 
 class FakeChar:
     def __init__(self, uuid: str, properties: list[str]) -> None:
         self.uuid = uuid
         self.properties = properties
+        self.descriptors: list[BleakDescriptor] = []
 
 
 class FakeService:

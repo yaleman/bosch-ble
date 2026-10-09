@@ -153,7 +153,7 @@ async def scan_via_esphome(
     """Scan for BLE devices via ESP32 proxy."""
     import habluetooth
 
-    async with esphome_proxy_context(config) as conn:
+    async with esphome_proxy_context(config):
         # Get the habluetooth manager that has the ESP32 scanner registered
         ha_manager = habluetooth.get_manager()
         

@@ -6,6 +6,7 @@ import socket
 import struct
 import sys
 from dataclasses import dataclass
+from typing import Protocol
 
 
 AF_BLUETOOTH = 31
@@ -88,7 +89,11 @@ def bind_mgmt_socket(sock: socket.socket) -> None:
         raise OSError(errno, "bind(HCI_CHANNEL_CONTROL) failed")
 
 
-def receive_mgmt_response(sock: socket.socket) -> tuple[int, int]:
+class MgmtReceiver(Protocol):
+    def recv(self, bufsize: int, /) -> bytes: ...
+
+
+def receive_mgmt_response(sock: MgmtReceiver) -> tuple[int, int]:
     buf = b""
     while True:
         chunk = sock.recv(4096)
