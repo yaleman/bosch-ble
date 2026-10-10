@@ -156,14 +156,14 @@ async def scan_via_esphome(
     async with esphome_proxy_context(config):
         # Get the habluetooth manager that has the ESP32 scanner registered
         ha_manager = habluetooth.get_manager()
-        
+
         # Wait for advertisements to come in
         await asyncio.sleep(timeout)
-        
+
         # Get discovered devices from the manager
         discovered: list[tuple[BLEDevice, Any]] = []
         devices = ha_manager.async_discovered_devices(connectable=True)
-        
+
         for device in devices:
             # Convert to BLEDevice format with required fields for ESPHomeClient
             bleak_device = BLEDevice(
@@ -175,7 +175,7 @@ async def scan_via_esphome(
                 },
             )
             discovered.append((bleak_device, None))
-            
+
             if detection_callback:
                 detection_callback(bleak_device, None)
 
@@ -201,10 +201,10 @@ async def esphome_bleak_client(
             name=None,
             details={"source": config.host, "address_type": 0},
         )
-        
+
         # Create the ESPHomeClient using the client_data from the connection
         client = ESPHomeClient(device, client_data=conn.client_data, timeout=timeout)
-        
+
         try:
             await client.connect(pair=pair)
             yield client

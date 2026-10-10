@@ -12,9 +12,9 @@ from bleak.backends.device import BLEDevice
 from bosch_ble import bluez, esphome_proxy
 from bosch_ble._common import (
     BleakDescriptor,
+    Services,
     format_cli_error,
     normalize_uuid,
-    Services,
     SecurityClient,
     validate_address,
 )
@@ -146,7 +146,11 @@ async def prepare_connection(
     return bluez.BluezState(
         address=connected_state.address,
         visible=connected_state.visible,
-        device=connected_state.device if connected_state.device is not None else state.device if state else None,
+        device=connected_state.device
+        if connected_state.device is not None
+        else state.device
+        if state
+        else None,
         name=connected_state.name or (state.name if state else None),
         paired=connected_state.paired,
         trusted=connected_state.trusted,
@@ -222,9 +226,7 @@ async def main(
                                         f"    [DESC] handle={descriptor.handle} uuid={descriptor.uuid}"
                                     )
                                     try:
-                                        dval = await client.read_gatt_descriptor(
-                                            descriptor.handle
-                                        )
+                                        dval = await client.read_gatt_descriptor(descriptor.handle)
                                         print(
                                             f"           value={bytes(dval).hex()} raw={bytes(dval)!r}"
                                         )
@@ -269,9 +271,7 @@ async def main(
                                     f"    [DESC] handle={descriptor.handle} uuid={descriptor.uuid}"
                                 )
                                 try:
-                                    dval = await client.read_gatt_descriptor(
-                                        descriptor.handle
-                                    )
+                                    dval = await client.read_gatt_descriptor(descriptor.handle)
                                     print(
                                         f"           value={bytes(dval).hex()} raw={bytes(dval)!r}"
                                     )

@@ -22,14 +22,7 @@ def test_encode_load_connection_parameters_builds_expected_packet() -> None:
     )
 
     assert packet == bytes.fromhex(
-        "35 00 00 00 11 00 "
-        "01 00 "
-        "fc 64 ba 63 04 00 "
-        "01 "
-        "18 00 "
-        "18 00 "
-        "00 00 "
-        "48 00"
+        "35 00 00 00 11 00 01 00 fc 64 ba 63 04 00 01 18 00 18 00 00 00 48 00"
     )
 
 
@@ -119,7 +112,6 @@ def test_receive_mgmt_response_handles_partial_event_across_recvs() -> None:
 
     assert event_code == mgmt.MGMT_EV_CMD_COMPLETE
     assert status == mgmt.MGMT_STATUS_SUCCESS
-
 
 
 def test_load_connection_parameters_reports_trusted_socket_requirement(
